@@ -2,6 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { transactionsApi } from "@/lib/api";
+import {
+  formatCurrency,
+  formatPercent,
+  savingsRate,
+  topCategories,
+} from "@/lib/utils";
 
 export default function ReportsPage() {
   const [summary, setSummary] = useState<any>(null);
@@ -52,14 +58,6 @@ export default function ReportsPage() {
     fetchSummary();
   }, [period]);
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("id-ID", {
-      style: "currency",
-      currency: "IDR",
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -68,19 +66,36 @@ export default function ReportsPage() {
     );
   }
 
+  const income = summary?.totalIncome ?? 0;
+  const expense = summary?.totalExpense ?? 0;
+  const net = income - expense;
+  const rate = savingsRate(income, expense);
+  const topSpend = topCategories(summary?.byCategory, 3);
+  type WalletFlow = { income: number; expense: number };
+  const walletEntries = (
+    summary?.byWallet
+      ? (Object.entries(summary.byWallet) as [string, WalletFlow][])
+      : []
+  ).sort((a, b) => b[1].expense - a[1].expense);
+  const periodLabel = { day: "Today", week: "This week", month: "This month" }[
+    period
+  ];
+  const daysElapsed =
+    period === "day" ? 1 : period === "week" ? 7 : new Date().getDate();
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-          <p className="text-gray-500">View your spending analytics</p>
+          <p className="text-gray-500">{periodLabel} at a glance</p>
         </div>
         <div className="flex space-x-2">
           {(["day", "week", "month"] as const).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
                 period === p
                   ? "bg-blue-600 text-white"
                   : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
@@ -92,29 +107,135 @@ export default function ReportsPage() {
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-lg shadow-sm p-6 border">
-          <h3 className="text-sm font-medium text-gray-500">Total Income</h3>
-          <p className="mt-2 text-3xl font-bold text-green-600">
-            {summary ? formatCurrency(summary.totalIncome) : "Rp0"}
+      {/* Headline figures */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg shadow-sm p-5 border">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Income
+          </p>
+          <p className="mt-1.5 text-xl font-bold text-green-600">
+            {formatCurrency(income)}
           </p>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-6 border">
-          <h3 className="text-sm font-medium text-gray-500">Total Expense</h3>
-          <p className="mt-2 text-3xl font-bold text-red-600">
-            {summary ? formatCurrency(summary.totalExpense) : "Rp0"}
+        <div className="bg-white rounded-lg shadow-sm p-5 border">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Expense
+          </p>
+          <p className="mt-1.5 text-xl font-bold text-red-600">
+            {formatCurrency(expense)}
           </p>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-6 border">
-          <h3 className="text-sm font-medium text-gray-500">Net Balance</h3>
-          <p className="mt-2 text-3xl font-bold text-blue-600">
-            {summary
-              ? formatCurrency(summary.totalIncome - summary.totalExpense)
-              : "Rp0"}
+        <div className="bg-white rounded-lg shadow-sm p-5 border">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Net
+          </p>
+          <p
+            className={`mt-1.5 text-xl font-bold ${net >= 0 ? "text-gray-900" : "text-red-600"}`}
+          >
+            {formatCurrency(net)}
+          </p>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm p-5 border">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Savings rate
+          </p>
+          <p
+            className={`mt-1.5 text-xl font-bold ${rate >= 0 ? "text-green-600" : "text-red-600"}`}
+          >
+            {income > 0 ? formatPercent(rate) : "—"}
+          </p>
+          <p className="mt-1 text-xs text-gray-400">
+            {formatCurrency(expense / Math.max(1, daysElapsed))} per day
           </p>
         </div>
       </div>
+
+      {/* Insight strip */}
+      {(topSpend.length > 0 || walletEntries.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Heaviest spending
+            </h2>
+            {topSpend.length === 0 ? (
+              <p className="mt-2 text-sm text-gray-500">
+                No expenses in this period.
+              </p>
+            ) : (
+              <>
+                <p className="mt-2 text-sm text-gray-600">
+                  <span className="font-semibold text-gray-900">
+                    {topSpend[0].name}
+                  </span>{" "}
+                  took the most at{" "}
+                  <span className="font-semibold text-gray-900">
+                    {formatCurrency(topSpend[0].amount)}
+                  </span>{" "}
+                  ({formatPercent(topSpend[0].percent, 0)} of all spending).
+                </p>
+                <div className="mt-4 space-y-3">
+                  {topSpend.map((s) => (
+                    <div key={s.name}>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-700">{s.name}</span>
+                        <span className="text-gray-500">
+                          {formatCurrency(s.amount)}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-2 rounded-full bg-gray-100 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-red-400"
+                          style={{ width: `${s.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Active accounts
+            </h2>
+            {walletEntries.length === 0 ? (
+              <p className="mt-2 text-sm text-gray-500">
+                No activity in this period.
+              </p>
+            ) : (
+              <>
+                <p className="mt-2 text-sm text-gray-600">
+                  {walletEntries[0][0]} saw the most outflow at{" "}
+                  <span className="font-semibold text-gray-900">
+                    {formatCurrency(walletEntries[0][1].expense)}
+                  </span>
+                  .
+                </p>
+                <ul className="mt-4 space-y-2">
+                  {walletEntries.map(([name, data]) => (
+                    <li
+                      key={name}
+                      className="flex justify-between text-sm border-b border-gray-100 pb-2 last:border-0"
+                    >
+                      <span className="text-gray-700">{name}</span>
+                      <span className="text-gray-500">
+                        <span className="text-green-600">
+                          +{formatCurrency(data.income)}
+                        </span>{" "}
+                        ·{" "}
+                        <span className="text-red-600">
+                          −{formatCurrency(data.expense)}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* By Category */}
       <div className="bg-white rounded-lg shadow-sm border">

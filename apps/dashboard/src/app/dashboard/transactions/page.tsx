@@ -2,14 +2,20 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { transactionsApi, walletsApi, categoriesApi } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
+import {
+  transactionsApi,
+  walletsApi,
+  categoriesApi,
+  ApiError,
+} from "@/lib/api";
+import { formatCurrency, formatPercent } from "@/lib/utils";
 
 export default function TransactionsPage() {
   const [transactions, setTransactions] = useState<any[]>([]);
   const [wallets, setWallets] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
   const [filters, setFilters] = useState({
     walletId: "",
     categoryId: "",
@@ -45,8 +51,12 @@ export default function TransactionsPage() {
 
         const data = await transactionsApi.list(params);
         setTransactions(data);
-      } catch (error) {
-        console.error("Failed to load transactions:", error);
+      } catch (err: unknown) {
+        setError(
+          err instanceof ApiError
+            ? `${err.statusCode} ${err.errorMsg}: ${err.message}`
+            : "Failed to load transactions",
+        );
       } finally {
         setIsLoading(false);
       }
@@ -72,20 +82,85 @@ export default function TransactionsPage() {
       : "bg-red-100 text-red-700";
   };
 
+  const totalIncome = transactions
+    .filter((t) => t.category?.type === "INCOME")
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+  const totalExpense = transactions
+    .filter((t) => t.category?.type !== "INCOME")
+    .reduce((sum, t) => sum + Number(t.amount), 0);
+  const net = totalIncome - totalExpense;
+  const hasFilter = Object.values(filters).some(Boolean);
+  const expenseCount = transactions.length
+    ? transactions.filter((t) => t.category?.type !== "INCOME").length
+    : 0;
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-start">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Transactions</h1>
-          <p className="text-gray-500">Manage your transactions</p>
+          <p className="text-gray-500">
+            {hasFilter
+              ? `Filtered view · ${transactions.length} ${transactions.length === 1 ? "entry" : "entries"}`
+              : `All time · ${transactions.length} ${transactions.length === 1 ? "entry" : "entries"}`}
+          </p>
         </div>
         <Link
           href="/dashboard/transactions/new"
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+          className="text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
         >
-          New Transaction
+          + Add transaction
         </Link>
       </div>
+
+      {/* Stats derived from the rows currently in view */}
+      {transactions.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="bg-white rounded-lg shadow-sm p-5 border">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Income
+            </p>
+            <p className="mt-1.5 text-xl font-bold text-green-600">
+              {formatCurrency(totalIncome)}
+            </p>
+          </div>
+          <div className="bg-white rounded-lg shadow-sm p-5 border">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Expense
+            </p>
+            <p className="mt-1.5 text-xl font-bold text-red-600">
+              {formatCurrency(totalExpense)}
+            </p>
+          </div>
+          <div className="bg-white rounded-lg shadow-sm p-5 border">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Net
+            </p>
+            <p
+              className={`mt-1.5 text-xl font-bold ${net >= 0 ? "text-gray-900" : "text-red-600"}`}
+            >
+              {formatCurrency(net)}
+            </p>
+          </div>
+          <div className="bg-white rounded-lg shadow-sm p-5 border">
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+              Avg expense
+            </p>
+            <p className="mt-1.5 text-xl font-bold text-gray-900">
+              {formatCurrency(expenseCount ? totalExpense / expenseCount : 0)}
+            </p>
+            <p className="mt-1 text-xs text-gray-400">
+              {expenseCount} expense{expenseCount === 1 ? "" : "s"}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm border border-red-100">
+          {error}
+        </div>
+      )}
 
       {/* Filters */}
       <div className="bg-white rounded-lg shadow-sm p-4 border">

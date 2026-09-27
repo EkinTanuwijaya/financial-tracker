@@ -1,5 +1,17 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
 
+export class ApiError extends Error {
+  statusCode: number;
+  errorMsg: string;
+
+  constructor(statusCode: number, message: string, errorMsg: string) {
+    super(message);
+    this.name = "ApiError";
+    this.statusCode = statusCode;
+    this.errorMsg = errorMsg;
+  }
+}
+
 export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -17,10 +29,15 @@ export async function apiRequest<T>(
   });
 
   if (!response.ok) {
-    const error = await response
-      .json()
-      .catch(() => ({ message: "Request failed" }));
-    throw new Error(error.message || `HTTP error ${response.status}`);
+    const body = await response.json().catch(() => null);
+
+    const statusCode = body?.statusCode ?? response.status;
+    const errorMsg = body?.error ?? response.statusText ?? "Request failed";
+    const message = Array.isArray(body?.message)
+      ? body.message.join(", ")
+      : (body?.message ?? `HTTP error ${response.status}`);
+
+    throw new ApiError(statusCode, message, errorMsg);
   }
 
   if (response.status === 204) {

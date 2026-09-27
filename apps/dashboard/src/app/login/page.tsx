@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
+import { ApiError } from "@/lib/api";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -22,8 +23,12 @@ export default function LoginPage() {
       await login(email, password);
       router.push("/dashboard");
       router.refresh();
-    } catch (err: any) {
-      setError(err.message || "Login failed");
+    } catch (err: unknown) {
+      setError(
+        err instanceof ApiError
+          ? `${err.statusCode} ${err.errorMsg}: ${err.message}`
+          : "Login failed",
+      );
     } finally {
       setIsLoading(false);
     }

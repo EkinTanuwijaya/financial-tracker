@@ -7,12 +7,16 @@ import {
   Param,
   Delete,
   Query,
+  UseGuards,
+  Request,
 } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
 import { TransactionsService } from "./transactions.service";
+import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 
 @ApiTags("transactions")
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller("transactions")
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
@@ -30,9 +34,9 @@ export class TransactionsController {
       transactionDate: string;
       source?: string;
     },
-    @Query("userId") userId: string,
+    @Request() req: any,
   ) {
-    return this.transactionsService.create(userId, {
+    return this.transactionsService.create(req.user.id, {
       ...body,
       transactionDate: new Date(body.transactionDate),
     });
@@ -41,7 +45,7 @@ export class TransactionsController {
   @Get()
   @ApiOperation({ summary: "Get all transactions for user" })
   async findAll(
-    @Query("userId") userId: string,
+    @Request() req: any,
     @Query("walletId") walletId?: string,
     @Query("categoryId") categoryId?: string,
     @Query("startDate") startDate?: string,
@@ -49,7 +53,7 @@ export class TransactionsController {
     @Query("limit") limit?: number,
     @Query("offset") offset?: number,
   ) {
-    return this.transactionsService.findAll(userId, {
+    return this.transactionsService.findAll(req.user.id, {
       walletId,
       categoryId,
       startDate: startDate ? new Date(startDate) : undefined,
@@ -62,12 +66,12 @@ export class TransactionsController {
   @Get("summary")
   @ApiOperation({ summary: "Get transaction summary" })
   async getSummary(
-    @Query("userId") userId: string,
+    @Request() req: any,
     @Query("startDate") startDate?: string,
     @Query("endDate") endDate?: string,
   ) {
     return this.transactionsService.getSummary(
-      userId,
+      req.user.id,
       startDate ? new Date(startDate) : undefined,
       endDate ? new Date(endDate) : undefined,
     );
@@ -75,15 +79,15 @@ export class TransactionsController {
 
   @Get(":id")
   @ApiOperation({ summary: "Get transaction by ID" })
-  async findById(@Param("id") id: string, @Query("userId") userId: string) {
-    return this.transactionsService.findById(id, userId);
+  async findById(@Param("id") id: string, @Request() req: any) {
+    return this.transactionsService.findById(id, req.user.id);
   }
 
   @Patch(":id")
   @ApiOperation({ summary: "Update transaction" })
   async update(
     @Param("id") id: string,
-    @Query("userId") userId: string,
+    @Request() req: any,
     @Body()
     body: Partial<{
       walletId: string;
@@ -98,12 +102,12 @@ export class TransactionsController {
     if (body.transactionDate) {
       data.transactionDate = new Date(body.transactionDate);
     }
-    return this.transactionsService.update(id, userId, data);
+    return this.transactionsService.update(id, req.user.id, data);
   }
 
   @Delete(":id")
   @ApiOperation({ summary: "Delete transaction" })
-  async delete(@Param("id") id: string, @Query("userId") userId: string) {
-    return this.transactionsService.delete(id, userId);
+  async delete(@Param("id") id: string, @Request() req: any) {
+    return this.transactionsService.delete(id, req.user.id);
   }
 }
