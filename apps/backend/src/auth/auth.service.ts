@@ -31,7 +31,7 @@ export class AuthService {
     return { user: this.sanitizeUser(user), token };
   }
 
-  async login(data: { email: string; password: string }) {
+  async verifyCredentials(data: { email: string; password: string }) {
     const user = await this.usersService.findByEmail(data.email);
     if (!user || !user.passwordHash) {
       throw new UnauthorizedException("Invalid credentials");
@@ -42,6 +42,11 @@ export class AuthService {
       throw new UnauthorizedException("Invalid credentials");
     }
 
+    return user;
+  }
+
+  async login(data: { email: string; password: string }) {
+    const user = await this.verifyCredentials(data);
     const token = this.generateToken(user.id);
     return { user: this.sanitizeUser(user), token };
   }

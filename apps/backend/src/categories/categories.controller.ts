@@ -23,7 +23,10 @@ export class CategoriesController {
 
   @Post()
   @ApiOperation({ summary: "Create a new category" })
-  async create(@Body() body: { name: string; type: string }, @Request() req: any) {
+  async create(
+    @Body() body: { name: string; type: string },
+    @Request() req: any,
+  ) {
     return this.categoriesService.create(req.user.id, body);
   }
 

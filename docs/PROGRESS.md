@@ -51,7 +51,7 @@
 
 ---
 
-## Phase 1: Core Transaction (NEXT)
+## Phase 1: Core Transaction (MOSTLY COMPLETE — auto-seed remaining)
 
 ### Backend
 - [x] Transaction CRUD with wallet balance updates
@@ -63,13 +63,13 @@
 - [ ] Seed default categories on user creation (auto-seed)
 
 ### API Endpoints
-- [ ] POST /api/transactions
-- [ ] GET /api/transactions
-- [ ] GET /api/transactions/:id
-- [ ] PATCH /api/transactions/:id
-- [ ] DELETE /api/transactions/:id
-- [ ] GET /api/transactions/summary
-- [ ] POST /api/categories/seed
+- [x] POST /api/transactions
+- [x] GET /api/transactions
+- [x] GET /api/transactions/:id
+- [x] PATCH /api/transactions/:id
+- [x] DELETE /api/transactions/:id
+- [x] GET /api/transactions/summary
+- [x] POST /api/categories/seed
 
 ### Frontend
 - [x] Transaction list page
@@ -90,13 +90,37 @@
 
 ---
 
-## Phase 3: Telegram Bot (PLANNED)
+## Phase 3: Telegram Bot (IN PROGRESS - /wallets ✅ 2026-09-28)
 
-- [ ] Telegram Bot module
-- [ ] /start, /help commands
-- [ ] Text transaction parsing ("45000 makan siang")
-- [ ] Transaction confirmation flow
-- [ ] /balance, /transactions, /summary commands
+### `/wallets` command ✅
+- [x] `telegram` module registered in `AppModule` (no controller — service only)
+- [x] `TelegramService` — Bot API client over global `fetch`, no new
+      dependencies
+- [x] Long polling with exponential backoff (1s → 30s cap); per-update error
+      isolation so one bad message cannot kill the loop
+- [x] Commands: `/wallets`, `/balance` (alias), `/start`, `/help`
+- [x] Telegram login: `/login <email> <password>`, `/logout`, `/whoami`
+      - reuses `AuthService.verifyCredentials` (extracted from `login` so no
+        throwaway JWT is minted)
+      - writes the link through a dedicated `UsersService.setTelegramId` so
+        the unauthenticated `PATCH /api/users/:id` cannot hijack a link
+      - 5 failed attempts per chat per 10 minutes
+      - password message is deleted after success; if Telegram refuses, the
+        bot says so instead of claiming it deleted it
+      - refuses to overwrite an account already linked to another Telegram ID
+- [x] Identity via `User.telegramId`; unlinked users are told to use `/login`
+- [x] Private chats only — ignored in groups
+- [x] IDR formatting consistent with the dashboard (`Rp 12.500.000`)
+- [x] Graceful no-op when `TELEGRAM_BOT_TOKEN` is empty (logs a warning)
+- [x] Empty-wallet, unlinked, unknown-command, and negative-balance cases
+      verified against the real database
+- [ ] `POST /api/users` and `GET /api/users/telegram/:telegramId` are still
+      unauthenticated (see Open Issues) — needs guarding before linking is
+      safe over the public API
+- [ ] Transaction creation from text (Phase 3 remainder)
+
+**To enable:** put the BotFather token in `.env` as `TELEGRAM_BOT_TOKEN` and
+restart the backend. Long polling means only one instance may poll per token.
 
 ---
 
@@ -144,9 +168,98 @@
 - [x] Wallets page (CRUD)
 - [x] Categories page (CRUD + seed defaults)
 - [x] Reports page (by category, by wallet, period filter)
+- [x] Charts/visualizations — custom SVG/CSS concentration bar + spend
+      breakdown (no Recharts usage; see Open Issues)
 - [ ] Edit transaction page
 - [ ] Settings page
-- [ ] Charts/visualizations (Recharts)
+
+---
+
+## Phase 8.5: Dashboard Insight Refactor ✅ COMPLETED (2026-09-27)
+
+### Insight-first UI
+Replaced button-heavy layouts with analytics-led views.
+
+- [x] Dashboard insight cards: net worth, monthly income/spending, savings
+      rate, average daily spend, top spending categories, wallet
+      distribution, recent activity
+- [x] Compact row actions + summary analytics on transactions, wallets,
+      categories, reports
+- [x] Shared helpers centralized in `src/lib/utils.ts` (`formatCurrency`,
+      `formatNumberForInput`, `parseAmountInput`, `walletSlices`,
+      `savingsRate`, `topCategories`, `chartColor`)
+- [x] Stable wallet-name color mapping so chart and list swatches agree
+- [x] Tailwind configured to scan `src/lib/**` (palette classes were being
+      purged from dynamic class names)
+- [x] Structured `ApiError` surfaced in transactions UI
+
+### Currency: single-currency (IDR)
+Multi-currency support was built, then reverted in favor of hardcoded IDR.
+
+- [x] `CURRENCY_CODE` / `CURRENCY_SYMBOL` / `CURRENCY_LABEL` constants
+- [x] `formatCurrency` fixed to `id-ID` / IDR, 0 decimals
+- [x] Currency `<select>` replaced with a read-only IDR field
+- [x] Balance input accepts digits only, keeps one leading `-` (credit cards
+      can start overdrawn)
+- [x] Verified round-trip stability for `100.000`, `1.500.500`, `9.999.999`,
+      `abc`, empty, and negative inputs
+
+**Two bugs fixed by the revert** (present in the multi-currency version):
+`100.000` parsed as `100` instead of `100000`, and blur formatting mutated
+values (`1500` → displayed `1.501` → re-parsed as `1501`). IDR has no minor
+unit, so there is no decimal separator to disambiguate.
+
+### Backend security
+- [x] Fixed `req.user.sub` → `req.user.id` in `auth.controller.ts` (current-user
+      lookup)
+- [x] Added `JwtAuthGuard` + user scoping to wallets, categories,
+      transactions, receipts
+
+### Quality gates
+- [x] `tsc --noEmit` clean
+- [x] `next lint` — 0 errors (prettier violations fixed across 9 files)
+- [x] All dashboard routes return 200
+- [x] API round-trip verified (created + read back an IDR wallet, then
+      cleaned up the test data)
+
+---
+
+## Open Issues
+
+- [ ] **`apps/backend/dist/main.js` was a stale webpack bundle** shadowing all
+      backend code. A container restart was running Sep 27 code, so backend
+      fixes on disk were not live. Fixed by deleting `dist/` and rebuilding;
+      consider adding `dist/` cleanup to the Dockerfile or a `prebuild` script,
+      since `nest-cli.json` is absent and nothing guards against a mixed build.
+- [ ] **`/login` sends a password through Telegram** — acceptable for a local
+      single-user app (the bot deletes the message afterwards) but it does put
+      the credential in Telegram's servers. Before multi-user use, switch to a
+      one-time code generated from the dashboard.
+- [ ] **`users.controller.ts` is completely unauthenticated** and leaks data —
+      verified live: unauthenticated `GET /api/users/:id` returns the full user
+      record **including the bcrypt `passwordHash`**. `POST /api/users` also
+      accepts `passwordHash` directly, letting an attacker mint an account with
+      a password they know. `PATCH /api/users/:id` can modify any user. Add
+      `JwtAuthGuard` and strip `passwordHash` from all responses.
+- [ ] **`currency` column is not pinned server-side** — `Wallet.currency` and
+      `Transaction.currency` still exist with a `"IDR"` default and the API
+      still accepts the field. The UI always sends `IDR`, so nothing is broken,
+      but a direct API call can write a non-IDR value. Either drop the column
+      or enforce IDR in the DTO/service.
+- [ ] **Recharts is an unused dependency** — declared in the dashboard
+      `package.json` but never imported; all visualizations are custom
+      SVG/CSS. Remove it or adopt it.
+- [ ] **`apps/backend/src/reports` is an empty directory** — the reports page
+      aggregates client-side from `/api/transactions/summary`. Remove the dead
+      folder or implement the server-side module.
+- [ ] **Auto-seed** default wallets and categories on user creation (still
+      open from Phase 1).
+- [ ] **Line endings** — no `.gitattributes`; `core.autocrlf=true` plus
+      Prettier's default `endOfLine: "lf"` cause working-copy churn on edited
+      files. Add `* text=auto eol=lf` and remove the warning.
+- [ ] **Local Prisma client can go stale** — `apps/backend` typecheck failed
+      with implicit `any` until `npx prisma generate` was run. Run it after any
+      schema change.
 
 ---
 
@@ -225,16 +338,26 @@ src/
 3. **Human-in-the-loop** - All AI results require user confirmation
 4. **Idempotency** - Telegram updates processed once
 5. **Event-driven** - Future: domain events for balance updates, notifications
+6. **Single currency (IDR)** - Multi-currency was implemented and reverted.
+   Amounts are whole rupiah with `.` as the thousands separator, which makes
+   input parsing unambiguous. Every stored value is IDR; no conversion rates.
+7. **Insight-first UI** - Pages lead with analytics; actions stay compact and
+   inline rather than occupying dedicated button panels.
 
 ---
 
 ## Next Steps
 
-1. **Immediate**: Complete Phase 1 - Core Transaction CRUD
-2. **Then**: Architecture refactor (Phase 2)
-3. **Then**: Telegram Bot integration (Phase 3)
-4. **Parallel**: Frontend dashboard development (Phase 8)
+1. **Immediate**: Secure `users.controller.ts` — add `JwtAuthGuard`, strip
+   `passwordHash` from responses, remove `passwordHash` from the create DTO
+2. **Then**: Guard the backend build so a stale `dist/` cannot shadow source
+3. **Then**: Link a Telegram account end-to-end with a real bot token
+4. **Then**: Decide the fate of the `currency` column (drop vs. enforce IDR)
+5. **Then**: Auto-seed default wallets/categories on registration
+6. **Then**: Architecture refactor (Phase 2)
+7. **Parallel**: Finish Phase 8 (edit transaction page, settings page) and
+   the rest of Phase 3 (text transaction parsing)
 
 ---
 
-*Last Updated: 2026-09-26 (Dashboard auth + core pages completed)*
+*Last Updated: 2026-09-28 (Telegram /wallets command; stale dist build fixed; users controller found unauthenticated)*

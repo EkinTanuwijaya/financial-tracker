@@ -8,7 +8,8 @@ const TransactionSource = {
   MANUAL: "MANUAL" as const,
 } as const;
 
-type TransactionSource = (typeof TransactionSource)[keyof typeof TransactionSource];
+type TransactionSource =
+  (typeof TransactionSource)[keyof typeof TransactionSource];
 
 @Injectable()
 export class TransactionsService {

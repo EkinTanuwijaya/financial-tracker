@@ -40,4 +40,14 @@ export class UsersService {
       data,
     });
   }
+
+  // Kept separate from update() so the unauthenticated PATCH /api/users/:id
+  // route cannot be used to hijack a Telegram link.
+  async setTelegramId(userId: string, telegramId: string | null) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { telegramId },
+      select: { id: true, email: true, name: true, telegramId: true },
+    });
+  }
 }
