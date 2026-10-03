@@ -63,6 +63,30 @@ export const authApi = {
   me: () => apiRequest<any>("/auth/me"),
 };
 
+export const telegramApi = {
+  bot: () =>
+    apiRequest<{ username: string | null; firstName: string | null }>(
+      "/telegram/bot",
+    ),
+};
+
+export const usersApi = {
+  linkTelegram: (telegramId: string) =>
+    apiRequest<{ id: string; email: string; telegramId: string }>(
+      "/users/telegram/link",
+      {
+        method: "POST",
+        body: JSON.stringify({ telegramId }),
+      },
+    ),
+
+  unlinkTelegram: () =>
+    apiRequest<{ id: string; email: string; telegramId: null }>(
+      "/users/telegram/link",
+      { method: "DELETE" },
+    ),
+};
+
 export const transactionsApi = {
   list: (params?: Record<string, string>) => {
     const search = params ? `?${new URLSearchParams(params).toString()}` : "";

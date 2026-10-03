@@ -13,6 +13,7 @@ interface User {
   id: string;
   email: string;
   name?: string | null;
+  telegramId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -23,6 +24,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   register: (email: string, password: string, name?: string) => Promise<void>;
   logout: () => void;
+  refreshUser: () => Promise<void>;
   isLoading: boolean;
 }
 
@@ -77,9 +79,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const refreshUser = async () => {
+    const userData = await authApi.me();
+    setUser(userData);
+  };
+
   return (
     <AuthContext.Provider
-      value={{ user, token, login, register, logout, isLoading }}
+      value={{ user, token, login, register, logout, refreshUser, isLoading }}
     >
       {children}
     </AuthContext.Provider>

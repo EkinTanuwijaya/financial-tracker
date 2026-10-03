@@ -12,6 +12,12 @@ export class CategoriesService {
     });
   }
 
+  async findByName(userId: string, name: string) {
+    return this.prisma.category.findFirst({
+      where: { userId, name: { equals: name, mode: "insensitive" } },
+    });
+  }
+
   async findById(id: string, userId: string) {
     return this.prisma.category.findFirst({
       where: { id, userId },

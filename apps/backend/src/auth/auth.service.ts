@@ -15,8 +15,7 @@ export class AuthService {
   ) {}
 
   async register(data: { email: string; password: string; name?: string }) {
-    const existing = await this.usersService.findByEmail(data.email);
-    if (existing) {
+    if (await this.usersService.emailExists(data.email)) {
       throw new ConflictException("Email already registered");
     }
 
@@ -28,27 +27,30 @@ export class AuthService {
     });
 
     const token = this.generateToken(user.id);
-    return { user: this.sanitizeUser(user), token };
+    return { user, token };
   }
 
-  async verifyCredentials(data: { email: string; password: string }) {
-    const user = await this.usersService.findByEmail(data.email);
-    if (!user || !user.passwordHash) {
+  async login(data: { email: string; password: string }) {
+    // The only place a password hash is read, and it stays inside this method.
+    const credentials = await this.usersService.findCredentialsByEmail(data.email);
+    if (!credentials?.passwordHash) {
       throw new UnauthorizedException("Invalid credentials");
     }
 
-    const isValid = await bcrypt.compare(data.password, user.passwordHash);
+    const isValid = await bcrypt.compare(data.password, credentials.passwordHash);
     if (!isValid) {
       throw new UnauthorizedException("Invalid credentials");
     }
 
-    return user;
-  }
+    // Return the public profile (includes telegramId), not the
+    // credentials row, so the client sees the current Telegram link state.
+    const user = await this.usersService.findById(credentials.id);
+    if (!user) {
+      throw new UnauthorizedException("Invalid credentials");
+    }
 
-  async login(data: { email: string; password: string }) {
-    const user = await this.verifyCredentials(data);
     const token = this.generateToken(user.id);
-    return { user: this.sanitizeUser(user), token };
+    return { user, token };
   }
 
   async validateUser(userId: string) {
@@ -56,15 +58,10 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException("User not found");
     }
-    return this.sanitizeUser(user);
+    return user;
   }
 
   private generateToken(userId: string) {
     return this.jwtService.sign({ sub: userId });
-  }
-
-  private sanitizeUser(user: any) {
-    const { passwordHash, ...result } = user;
-    return result;
   }
 }

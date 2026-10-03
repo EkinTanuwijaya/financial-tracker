@@ -5,3 +5,4 @@ allowBuilds:
   bcrypt: true
   msgpackr-extract: true
   prisma: true
+  tesseract.js: true

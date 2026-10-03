@@ -8,57 +8,120 @@ import {
   savingsRate,
   topCategories,
 } from "@/lib/utils";
+import { exportReportPdf } from "@/lib/pdf";
+
+type ReportPeriod = "week" | "month" | "year" | "all";
+
+interface PeriodRange {
+  startDate?: string;
+  endDate?: string;
+  label: string;
+  dateRangeLabel: string;
+  daysElapsed: number | null;
+}
+
+function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function getPeriodRange(period: ReportPeriod): PeriodRange {
+  const now = new Date();
+  const end = toISODate(now);
+
+  switch (period) {
+    case "week": {
+      // Week starts Monday
+      const mondayOffset = (now.getDay() + 6) % 7;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - mondayOffset);
+      return {
+        startDate: toISODate(monday),
+        endDate: end,
+        label: "This week",
+        dateRangeLabel: `${monday.toLocaleDateString("id-ID", {
+          day: "numeric",
+          month: "short",
+        })} – ${now.toLocaleDateString("id-ID", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })}`,
+        daysElapsed: mondayOffset + 1,
+      };
+    }
+    case "year": {
+      const jan1 = new Date(now.getFullYear(), 0, 1);
+      return {
+        startDate: toISODate(jan1),
+        endDate: end,
+        label: "This year",
+        dateRangeLabel: String(now.getFullYear()),
+        daysElapsed:
+          Math.ceil((now.getTime() - jan1.getTime()) / 86_400_000) + 1,
+      };
+    }
+    case "all":
+      return {
+        label: "All time",
+        dateRangeLabel: "All time",
+        daysElapsed: null,
+      };
+    case "month":
+    default: {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      return {
+        startDate: toISODate(first),
+        endDate: end,
+        label: "This month",
+        dateRangeLabel: now.toLocaleDateString("id-ID", {
+          month: "long",
+          year: "numeric",
+        }),
+        daysElapsed: now.getDate(),
+      };
+    }
+  }
+}
 
 export default function ReportsPage() {
   const [summary, setSummary] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [period, setPeriod] = useState<"month" | "week" | "day">("month");
+  const [isExporting, setIsExporting] = useState(false);
+  const [period, setPeriod] = useState<ReportPeriod>("month");
+  const range = getPeriodRange(period);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchSummary = async () => {
       setIsLoading(true);
       try {
-        const now = new Date();
-        let startDate: Date;
+        const r = getPeriodRange(period);
+        const params: Record<string, string> = {};
+        if (r.startDate) params.startDate = r.startDate;
+        if (r.endDate) params.endDate = r.endDate;
 
-        switch (period) {
-          case "day":
-            startDate = new Date(
-              now.getFullYear(),
-              now.getMonth(),
-              now.getDate(),
-            );
-            break;
-          case "week":
-            const day = now.getDay();
-            startDate = new Date(
-              now.getFullYear(),
-              now.getMonth(),
-              now.getDate() - day,
-            );
-            break;
-          case "month":
-          default:
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            break;
-        }
-
-        const data = await transactionsApi.summary({
-          startDate: startDate.toISOString().split("T")[0],
-          endDate: now.toISOString().split("T")[0],
-        });
-        setSummary(data);
+        const data = await transactionsApi.summary(
+          Object.keys(params).length > 0 ? params : undefined,
+        );
+        if (!cancelled) setSummary(data);
       } catch (error) {
         console.error("Failed to load summary:", error);
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     fetchSummary();
+    return () => {
+      cancelled = true;
+    };
   }, [period]);
 
-  if (isLoading) {
+  if (isLoading && !summary) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -77,21 +140,38 @@ export default function ReportsPage() {
       ? (Object.entries(summary.byWallet) as [string, WalletFlow][])
       : []
   ).sort((a, b) => b[1].expense - a[1].expense);
-  const periodLabel = { day: "Today", week: "This week", month: "This month" }[
-    period
-  ];
-  const daysElapsed =
-    period === "day" ? 1 : period === "week" ? 7 : new Date().getDate();
+  const daysElapsed = range.daysElapsed;
+
+  const handleExport = () => {
+    if (!summary) return;
+    setIsExporting(true);
+    try {
+      exportReportPdf({
+        periodLabel: range.label,
+        dateRangeLabel: range.dateRangeLabel,
+        totalIncome: income,
+        totalExpense: expense,
+        byCategory: summary.byCategory ?? {},
+        byWallet: summary.byWallet ?? {},
+      });
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-          <p className="text-gray-500">{periodLabel} at a glance</p>
+          <p className="text-gray-500">
+            {range.label}
+            {range.dateRangeLabel !== range.label &&
+              ` · ${range.dateRangeLabel}`}
+          </p>
         </div>
-        <div className="flex space-x-2">
-          {(["day", "week", "month"] as const).map((p) => (
+        <div className="flex space-x-2 flex-wrap">
+          {(["week", "month", "year", "all"] as const).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
@@ -101,9 +181,18 @@ export default function ReportsPage() {
                   : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
               }`}
             >
-              {p.charAt(0).toUpperCase() + p.slice(1)}
+              {p === "all"
+                ? "All Time"
+                : p.charAt(0).toUpperCase() + p.slice(1)}
             </button>
           ))}
+          <button
+            onClick={handleExport}
+            disabled={isExporting || !summary}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isExporting ? "Exporting…" : "Export PDF"}
+          </button>
         </div>
       </div>
 
@@ -144,9 +233,11 @@ export default function ReportsPage() {
           >
             {income > 0 ? formatPercent(rate) : "—"}
           </p>
-          <p className="mt-1 text-xs text-gray-400">
-            {formatCurrency(expense / Math.max(1, daysElapsed))} per day
-          </p>
+          {daysElapsed !== null && (
+            <p className="mt-1 text-xs text-gray-400">
+              {formatCurrency(expense / Math.max(1, daysElapsed))} per day
+            </p>
+          )}
         </div>
       </div>
 
@@ -240,7 +331,9 @@ export default function ReportsPage() {
       {/* By Category */}
       <div className="bg-white rounded-lg shadow-sm border">
         <div className="px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">By Category</h2>
+          <h2 className="text-lg font-semibold text-gray-900">
+            By Category
+          </h2>
         </div>
         <div className="divide-y">
           {summary?.byCategory &&

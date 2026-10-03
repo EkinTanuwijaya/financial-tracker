@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/auth";
+import TelegramLinkBanner from "@/components/TelegramLinkBanner";
 import { ReactNode } from "react";
 
 const NAV_ITEMS = [
@@ -90,6 +91,7 @@ export default function ProtectedLayout({ children }: { children: ReactNode }) {
         </div>
       </nav>
       <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
+        <TelegramLinkBanner />
         {children}
       </main>
     </div>
