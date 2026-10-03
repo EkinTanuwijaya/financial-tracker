@@ -59,6 +59,12 @@ importers:
       ioredis:
         specifier: ^5.4.0
         version: 5.11.1
+      jspdf:
+        specifier: ^4.2.1
+        version: 4.2.1
+      jspdf-autotable:
+        specifier: ^5.0.8
+        version: 5.0.8(jspdf@4.2.1)
       passport:
         specifier: ^0.7.0
         version: 0.7.0

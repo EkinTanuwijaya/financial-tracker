@@ -97,11 +97,12 @@ export const HELP_TEXT = [
   "/category - list your categories",
   "/category <date or period> - spending grouped by category",
   "/category add <name> [expense|income] - create a category",
+  "/report [week|month|year|all] - send a PDF report",
   "/whoami - show which account this chat is linked to",
   "/help - show this message",
   "",
   "Dates: today, yesterday, 2026-09-29 or 29-09-2026.",
-  "Periods: week, month, year.",
+  "Periods: week, month, year, all.",
   "Your Telegram account must be linked from the dashboard first.",
 ].join("\n");
 

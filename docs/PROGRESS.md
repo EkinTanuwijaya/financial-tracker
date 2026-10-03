@@ -496,6 +496,38 @@ hot-reloads; config-file edits now require an image rebuild.
 
 ---
 
+## Phase 8.7: Telegram PDF Report Export ✅ COMPLETED (2026-10-03)
+
+- [x] `/report [week|month|year|all]` (alias `/export`) —
+      bot generates a PDF report and sends it as a document.
+      Default period: month. Indonesian aliases accepted
+      (minggu, bulan, tahun, semua)
+- [x] `apps/backend/src/reports/report-period.ts` — period
+      parsing + UTC range computation (week starts Monday,
+      end-of-day inclusive), matching the bot's existing
+      UTC date handling
+- [x] `apps/backend/src/reports/report-pdf.ts` — server-side
+      PDF generation with `jspdf` + `jspdf-autotable` (v5
+      API). Same layout as the dashboard export: headline
+      figures (income / expense / net / savings rate),
+      By Category table with totals, By Wallet table
+- [x] `TelegramService.sendDocument` — multipart/form-data
+      upload via Bot API `sendDocument` (file bytes cannot
+      go through the JSON `call` helper)
+- [x] Chat action `upload_document` sent while generating;
+      errors are logged (token redacted via `describe`) and
+      reported as a friendly message
+- [x] PDF caption includes period label, date range, income,
+      expense, net, and savings rate for quick preview
+      without opening the PDF
+- [x] HELP_TEXT updated with the new command and periods
+- [x] Verified: `tsc --noEmit` clean, jspdf installed in the
+      backend image, generated PDF valid (`%PDF-` header),
+      test PDF with detailed caption delivered to the linked
+      Telegram chat via `sendDocument` (`ok: true`)
+
+---
+
 ## Open Issues
 
 - [ ] **`apps/backend/dist/main.js` was a stale webpack bundle** shadowing all
@@ -640,4 +672,4 @@ src/
 
 ---
 
-*Last Updated: 2026-09-30 (AI text parsing with 9router/OpenAI-compatible provider; natural language → transaction with confirmation)*
+*Last Updated: 2026-10-03 (Telegram /report PDF export with week/month/year/all periods; dashboard PDF export)*

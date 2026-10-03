@@ -11,6 +11,12 @@ import { UsersService } from "../users/users.service";
 import { WalletsService } from "../wallets/wallets.service";
 import { ReceiptsService } from "../receipts/receipts.service";
 import { AiService, TransactionExtraction } from "../ai/ai.service";
+import { generateReportPdf } from "../reports/report-pdf";
+import {
+  REPORT_USAGE,
+  getReportRange,
+  parseReportPeriod,
+} from "../reports/report-period";
 import {
   CATEGORY_ADD_USAGE,
   CATEGORY_USAGE,
@@ -34,6 +40,19 @@ const TELEGRAM_API = "https://api.telegram.org";
 const POLL_TIMEOUT_SECONDS = 25;
 const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
+
+function idr(amount: number): string {
+  const grouped = Math.round(Math.abs(amount))
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  const sign = amount < 0 ? "-" : "";
+  return `${sign}Rp ${grouped}`;
+}
+
+function formatPercent(value: number, digits = 1): string {
+  if (!Number.isFinite(value)) return "0%";
+  return `${value.toFixed(digits).replace(/\.0+$/, "")}%`;
+}
 
 interface TelegramMessage {
   message_id: number;
@@ -198,6 +217,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       case "/categories":
         await this.sendCategories(message, args);
         return;
+      case "/report":
+      case "/export":
+        await this.sendReport(message, args.join(" "));
+        return;
       default:
         // Not a known command: classify first, then try AI extraction if it looks like a transaction
         if (this.ai.isAvailable()) {
@@ -349,6 +372,60 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         })),
       ),
     );
+  }
+
+  private async sendReport(
+    message: TelegramMessage,
+    periodArg: string,
+  ): Promise<void> {
+    const user = await this.findLinkedUser(message);
+    if (!user) return;
+
+    const period = parseReportPeriod(periodArg);
+    if (!period) {
+      await this.sendMessage(
+        message.chat.id,
+        [`I could not read "${periodArg}" as a period.`, "", REPORT_USAGE].join(
+          "\n",
+        ),
+      );
+      return;
+    }
+
+    const range = getReportRange(period);
+
+    try {
+      await this.sendChatAction(message.chat.id, "upload_document");
+      const summary = await this.transactions.getSummary(
+        user.id,
+        range.startDate,
+        range.endDate,
+      );
+      const pdf = generateReportPdf(summary, {
+        label: range.label,
+        dateRangeLabel: range.dateRangeLabel,
+      });
+      await this.sendDocument(
+        message.chat.id,
+        pdf,
+        `financial-report-${range.period}.pdf`,
+        [
+          `📊 Your financial report — ${range.label}`,
+          `📅 Period: ${range.dateRangeLabel}`,
+          "",
+          `💰 Income: ${idr(summary.totalIncome)}`,
+          `💸 Expense: ${idr(summary.totalExpense)}`,
+          `📈 Net: ${idr(summary.totalIncome - summary.totalExpense)}`,
+          `💡 Savings rate: ${summary.totalIncome > 0 ? formatPercent(((summary.totalIncome - summary.totalExpense) / summary.totalIncome) * 100) : "—"}`,
+        ].join("\n"),
+      );
+    } catch (error) {
+      this.logger.error(`Report failed: ${this.describe(error)}`);
+      await this.sendMessage(
+        message.chat.id,
+        "Could not generate the report. Please try again.",
+      );
+    }
   }
 
   private async sendWalletCommand(
@@ -870,6 +947,42 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       text,
       disable_web_page_preview: true,
     });
+  }
+
+  /**
+   * Sends a file via sendDocument (multipart/form-data — the Bot API
+   * does not accept file bytes as JSON).
+   */
+  private async sendDocument(
+    chatId: number,
+    file: Buffer,
+    filename: string,
+    caption?: string,
+  ): Promise<void> {
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    form.append(
+      "document",
+      new Blob([file], { type: "application/pdf" }),
+      filename,
+    );
+    if (caption) {
+      form.append("caption", caption);
+    }
+
+    const response = await fetch(
+      `${TELEGRAM_API}/bot${this.token}/sendDocument`,
+      { method: "POST", body: form },
+    );
+
+    const data = (await response.json()) as {
+      ok: boolean;
+      description?: string;
+    };
+
+    if (!data.ok) {
+      throw new Error(data.description ?? `HTTP ${response.status}`);
+    }
   }
 
   private async sendChatAction(chatId: number, action: "typing" | "record_audio" | "upload_photo" | "upload_video" | "upload_document" | "find_location"): Promise<void> {
