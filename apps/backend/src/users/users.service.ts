@@ -4,6 +4,7 @@ import {
   Injectable,
 } from "@nestjs/common";
 import { PrismaService } from "../common/prisma/prisma.service";
+import { DEFAULT_CATEGORIES } from "../categories/default-categories";
 
 // Telegram user IDs are positive integers. The current range is well under
 // 13 digits, so anything outside this is a typo rather than a real ID.
@@ -70,7 +71,10 @@ export class UsersService {
     telegramId?: string;
   }) {
     return this.prisma.user.create({
-      data,
+      data: {
+        ...data,
+        categories: { create: DEFAULT_CATEGORIES },
+      },
       select: UsersService.PUBLIC_SELECT,
     });
   }

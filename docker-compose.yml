@@ -31,6 +31,21 @@ services:
       timeout: 5s
       retries: 5
 
+  ocr:
+    build:
+      context: .
+      dockerfile: docker/ocr.Dockerfile
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - paddleocr_models:/root/.paddlex
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 300s
+
   backend:
     build:
       context: .
@@ -40,6 +55,7 @@ services:
       - .env
     environment:
       - PORT=3001
+      - OCR_BASE_URL=http://ocr:8000
       - CORS_ORIGIN=http://localhost:3000
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/finance_tracker?schema=public
       - REDIS_URL=redis://redis:6379
@@ -54,6 +70,8 @@ services:
     ports:
       - "3001:3001"
     depends_on:
+      ocr:
+        condition: service_healthy
       postgres:
         condition: service_healthy
       redis:
@@ -95,3 +113,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  paddleocr_models:

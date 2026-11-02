@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { OcrService } from "../ocr/ocr.service";
 import { AiService } from "../ai/ai.service";
+import { compactOcrText } from "../ai/compact-ocr-text";
+import { receiptAmount } from "./receipt-amount";
 
 @Injectable()
 export class ReceiptsService {
@@ -104,10 +106,18 @@ export class ReceiptsService {
 
       let extraction;
       try {
-        extraction = await this.ai.extractTransaction(text, {
+        const aiText = compactOcrText(text);
+        this.logger.debug(`OCR input compacted: ${text.length} to ${aiText.length} characters`);
+        extraction = await this.ai.extractTransaction(aiText, {
           wallets: wallets.map((w) => w.name),
           categories: categories.map((c) => c.name),
         }, caption);
+        if (extraction) {
+          extraction.amount = receiptAmount(aiText) ?? extraction.amount;
+          if (!Number.isFinite(extraction.amount) || extraction.amount <= 0) {
+            throw new Error("Could not detect a valid positive receipt amount.");
+          }
+        }
       } catch (aiError) {
         const msg = aiError instanceof Error ? aiError.message : String(aiError);
         this.logger.error(`AI extraction failed: ${msg}`);

@@ -9,6 +9,7 @@ import {
   topCategories,
 } from "@/lib/utils";
 import { exportReportPdf } from "@/lib/pdf";
+import FinanceIcon from "@/components/FinanceIcon";
 
 type ReportPeriod = "week" | "month" | "year" | "all";
 
@@ -90,6 +91,8 @@ export default function ReportsPage() {
   const [summary, setSummary] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [loadError, setLoadError] = useState("");
   const [period, setPeriod] = useState<ReportPeriod>("month");
   const range = getPeriodRange(period);
 
@@ -98,6 +101,8 @@ export default function ReportsPage() {
 
     const fetchSummary = async () => {
       setIsLoading(true);
+      setLoadError("");
+      setExportError("");
       try {
         const r = getPeriodRange(period);
         const params: Record<string, string> = {};
@@ -110,6 +115,12 @@ export default function ReportsPage() {
         if (!cancelled) setSummary(data);
       } catch (error) {
         console.error("Failed to load summary:", error);
+        if (!cancelled) {
+          setSummary(null);
+          setLoadError(
+            "Could not load this period. Select another period or refresh to retry.",
+          );
+        }
       } finally {
         if (!cancelled) setIsLoading(false);
       }
@@ -143,7 +154,8 @@ export default function ReportsPage() {
   const daysElapsed = range.daysElapsed;
 
   const handleExport = () => {
-    if (!summary) return;
+    if (!summary || isLoading) return;
+    setExportError("");
     setIsExporting(true);
     try {
       exportReportPdf({
@@ -154,6 +166,8 @@ export default function ReportsPage() {
         byCategory: summary.byCategory ?? {},
         byWallet: summary.byWallet ?? {},
       });
+    } catch {
+      setExportError("Could not create the PDF. Please try again.");
     } finally {
       setIsExporting(false);
     }
@@ -186,15 +200,54 @@ export default function ReportsPage() {
                 : p.charAt(0).toUpperCase() + p.slice(1)}
             </button>
           ))}
-          <button
-            onClick={handleExport}
-            disabled={isExporting || !summary}
-            className="px-3 py-1.5 rounded-lg text-sm font-medium bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isExporting ? "Exporting…" : "Export PDF"}
-          </button>
         </div>
       </div>
+
+      {loadError && (
+        <p role="alert" className="text-sm text-red-600">
+          {loadError}
+        </p>
+      )}
+      <section
+        className="report-export-panel"
+        aria-labelledby="report-export-title"
+        aria-busy={isLoading || isExporting}
+      >
+        <span className="report-export-icon">
+          <FinanceIcon name="reports" />
+        </span>
+        <div className="report-export-description">
+          <p className="eyebrow">TAKE THE INSIGHTS WITH YOU</p>
+          <h2 id="report-export-title">
+            Your financial picture, in one report.
+          </h2>
+          <p>
+            {range.label} · {range.dateRangeLabel} · A4 PDF
+          </p>
+          <ul aria-label="Included in the PDF">
+            <li>Cash-flow overview</li>
+            <li>Spending shares</li>
+            <li>Category & wallet details</li>
+          </ul>
+          {exportError && (
+            <p className="report-export-error" role="alert">
+              {exportError}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={handleExport}
+          disabled={isExporting || isLoading || !summary}
+          className="primary-action"
+        >
+          <FinanceIcon name="down" />
+          {isExporting
+            ? "Preparing PDF…"
+            : isLoading
+              ? "Loading period…"
+              : "Download report"}
+        </button>
+      </section>
 
       {/* Headline figures */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -331,9 +384,7 @@ export default function ReportsPage() {
       {/* By Category */}
       <div className="bg-white rounded-lg shadow-sm border">
         <div className="px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">
-            By Category
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900">By Category</h2>
         </div>
         <div className="divide-y">
           {summary?.byCategory &&

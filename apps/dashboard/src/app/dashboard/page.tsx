@@ -1,328 +1,543 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { transactionsApi, walletsApi, categoriesApi } from "@/lib/api";
-import { useAuth } from "@/lib/auth";
+import Link from "next/link";
+import { transactionsApi, walletsApi } from "@/lib/api";
 import {
   formatCurrency,
   formatDateShort,
   formatPercent,
   savingsRate,
   topCategories,
-  walletSlices,
-  chartColor,
 } from "@/lib/utils";
+import {
+  currentMonth,
+  overviewPeriod,
+  type FinancialSummary,
+} from "@/lib/overview";
+import FinanceIcon from "@/components/FinanceIcon";
+import MonthPicker from "@/components/MonthPicker";
+
+type Wallet = {
+  id: string;
+  name: string;
+  balance: number | string;
+  type: string;
+};
+type Transaction = {
+  id: string;
+  amount: number | string;
+  description?: string;
+  transactionDate: string;
+  category?: { name: string; type: string };
+  wallet?: { name: string };
+};
+const SPENDING_COLORS = [
+  "#245b45",
+  "#87ad76",
+  "#d6b86c",
+  "#cc896c",
+  "#9a97b4",
+  "#ccd3ca",
+];
 
 export default function DashboardPage() {
-  const { user } = useAuth();
-  const [summary, setSummary] = useState<any>(null);
-  const [wallets, setWallets] = useState<any[]>([]);
-  const [categories, setCategories] = useState<any[]>([]);
-  const [recent, setRecent] = useState<any[]>([]);
+  const [month, setMonth] = useState(currentMonth);
+  const [allTime, setAllTime] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [data, setData] = useState<{
+    summary: FinancialSummary;
+    wallets: Wallet[];
+    recent: Transaction[];
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState("");
+  const period = overviewPeriod(month, allTime);
 
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-
-        const [summaryData, walletsData, categoriesData, recentData] =
-          await Promise.all([
-            transactionsApi.summary({
-              startDate: monthStart.toISOString().split("T")[0],
-              endDate: now.toISOString().split("T")[0],
-            }),
-            walletsApi.list(),
-            categoriesApi.list(),
-            transactionsApi.list(),
-          ]);
-
-        setSummary(summaryData);
-        setWallets(walletsData);
-        setCategories(categoriesData);
-        setRecent(recentData.slice(0, 6));
-      } catch (error) {
-        console.error("Failed to load dashboard data:", error);
-      } finally {
-        setIsLoading(false);
-      }
+    let cancelled = false;
+    setIsLoading(true);
+    setError("");
+    const range = overviewPeriod(month, allTime);
+    Promise.all([
+      transactionsApi.summary(range.params),
+      walletsApi.list(),
+      transactionsApi.list({ ...range.params, limit: "6" }),
+    ])
+      .then(([summary, wallets, recent]) => {
+        if (!cancelled) setData({ summary, wallets, recent });
+      })
+      .catch(() => {
+        if (!cancelled)
+          setError("We couldn’t load your finances. Please try again.");
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+    return () => {
+      cancelled = true;
     };
+  }, [month, allTime, revision]);
 
-    fetchData();
-  }, []);
-
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
-  const income = summary?.totalIncome ?? 0;
-  const expense = summary?.totalExpense ?? 0;
+  const income = data?.summary.totalIncome ?? 0;
+  const expense = data?.summary.totalExpense ?? 0;
   const net = income - expense;
+  const balance =
+    data?.wallets.reduce((sum, wallet) => sum + Number(wallet.balance), 0) ?? 0;
   const rate = savingsRate(income, expense);
-  const netWorth = wallets.reduce((sum, w) => sum + Number(w.balance), 0);
-  const spendBreakdown = topCategories(summary?.byCategory, 5);
-  const walletShare = walletSlices(wallets);
-  const monthName = new Date().toLocaleDateString("id-ID", { month: "long" });
-  const unusedCategories = categories.filter(
-    (c) => !spendBreakdown.some((s) => s.name === c.name),
+  const categories = topCategories(data?.summary.byCategory, 5);
+  const remainingExpense = Math.max(
+    0,
+    expense - categories.reduce((sum, item) => sum + item.amount, 0),
   );
+  const slices = [
+    ...categories,
+    ...(remainingExpense > 0
+      ? [
+          {
+            name: "Other categories",
+            amount: remainingExpense,
+            percent: (remainingExpense / expense) * 100,
+          },
+        ]
+      : []),
+  ];
+  let progress = 0;
+  const donut = slices
+    .map((slice, index) => {
+      const start = progress;
+      progress += slice.percent;
+      return `${SPENDING_COLORS[index]} ${start}% ${progress}%`;
+    })
+    .join(", ");
+  const flowMax = Math.max(income, expense, 1);
+  const negativeWallets =
+    data?.wallets.filter((wallet) => Number(wallet.balance) < 0).length ?? 0;
+  const transactionLink = `/dashboard/transactions?${new URLSearchParams(period.params)}`;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-500">
-          {monthName} overview for {user?.name || user?.email}
-        </p>
+    <div className="overview-page">
+      <div className="overview-heading">
+        <div>
+          <p className="eyebrow">THE BIG PICTURE</p>
+          <h1>
+            Financial overview<span>.</span>
+          </h1>
+          <p>Your money, with a little more perspective.</p>
+        </div>
+        <Link href="/dashboard/transactions/new" className="primary-action">
+          <FinanceIcon name="plus" />
+          Add transaction
+        </Link>
       </div>
 
-      {/* Headline figures */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-lg shadow-sm p-6 border md:col-span-2">
-          <p className="text-sm font-medium text-gray-500">Net worth</p>
-          <p className="mt-2 text-3xl font-bold text-gray-900">
-            {formatCurrency(netWorth)}
-          </p>
-          <p className="mt-2 text-sm text-gray-500">
-            Across {wallets.length}{" "}
-            {wallets.length === 1 ? "wallet" : "wallets"}
-            {walletShare.length > 0 &&
-              ` · largest ${walletShare[0].name} at ${formatPercent(walletShare[0].percent, 0)}`}
-          </p>
+      <div className="period-toolbar">
+        <div className="period-controls">
+          <div
+            className="period-toggle"
+            role="group"
+            aria-label="Overview period"
+          >
+            <button aria-pressed={!allTime} onClick={() => setAllTime(false)}>
+              Monthly
+            </button>
+            <button aria-pressed={allTime} onClick={() => setAllTime(true)}>
+              All time
+            </button>
+          </div>
+          <MonthPicker
+            value={month}
+            onChange={(value) => {
+              setMonth(value);
+              setAllTime(false);
+            }}
+          />
         </div>
-
-        <div className="bg-white rounded-lg shadow-sm p-6 border">
-          <p className="text-sm font-medium text-gray-500">Income</p>
-          <p className="mt-2 text-2xl font-bold text-green-600">
-            {formatCurrency(income)}
-          </p>
-          <p className="mt-2 text-sm text-gray-500">This month</p>
-        </div>
-
-        <div className="bg-white rounded-lg shadow-sm p-6 border">
-          <p className="text-sm font-medium text-gray-500">Spending</p>
-          <p className="mt-2 text-2xl font-bold text-red-600">
-            {formatCurrency(expense)}
-          </p>
-          <p className="mt-2 text-sm text-gray-500">
-            {income > 0 ? `${formatPercent(rate)} saved` : "No income yet"}
-          </p>
+        <div className="period-context">
+          <span>{period.label}</span>
+          <button
+            className="refresh-button"
+            onClick={() => setRevision((value) => value + 1)}
+            disabled={isLoading}
+            aria-label="Refresh finances"
+          >
+            <FinanceIcon
+              name="refresh"
+              className={isLoading ? "animate-spin" : ""}
+            />
+          </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Net position */}
-        <div className="bg-white rounded-lg shadow-sm border p-6">
-          <h2 className="text-lg font-semibold text-gray-900">Month to date</h2>
-          <div className="mt-4 space-y-3">
-            <div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Saved</span>
-                <span
-                  className={`font-medium ${net >= 0 ? "text-green-600" : "text-red-600"}`}
-                >
+      {error ? (
+        <div className="overview-error" role="alert">
+          <p>{error}</p>
+          <button onClick={() => setRevision((value) => value + 1)}>
+            Try again
+          </button>
+        </div>
+      ) : isLoading ? (
+        <div
+          className="overview-skeleton"
+          role="status"
+          aria-label="Loading financial overview"
+        >
+          <div />
+          <div />
+          <div />
+          <div />
+          <span>Gathering your financial picture…</span>
+        </div>
+      ) : (
+        data && (
+          <>
+            {/* Headline figures */}
+            <section className="metric-grid" aria-label="Financial summary">
+              <article className="metric-card balance-card">
+                <div className="metric-top">
+                  <span>Total balance</span>
+                  <FinanceIcon name="wallet" />
+                </div>
+                <p className="metric-value">{formatCurrency(balance)}</p>
+                <div className="metric-foot">
+                  <span className="balance-dot" />
+                  {data.wallets.length}{" "}
+                  {data.wallets.length === 1 ? "wallet" : "wallets"} · current
+                  balance
+                </div>
+              </article>
+              <article className="metric-card">
+                <div className="metric-top">
+                  <span>Money in</span>
+                  <span className="metric-icon income-icon">
+                    <FinanceIcon name="down" />
+                  </span>
+                </div>
+                <p className="metric-value income-text">
+                  {formatCurrency(income)}
+                </p>
+                <div className="metric-foot">Income · {period.label}</div>
+              </article>
+              <article className="metric-card">
+                <div className="metric-top">
+                  <span>Money out</span>
+                  <span className="metric-icon expense-icon">
+                    <FinanceIcon name="up" />
+                  </span>
+                </div>
+                <p className="metric-value expense-text">
+                  {formatCurrency(expense)}
+                </p>
+                <div className="metric-foot">Spending · {period.label}</div>
+              </article>
+              <article className="metric-card">
+                <div className="metric-top">
+                  <span>Net cash flow</span>
+                  <span className="metric-icon">
+                    <FinanceIcon name="transactions" />
+                  </span>
+                </div>
+                <p className={`metric-value ${net < 0 ? "expense-text" : ""}`}>
+                  {net > 0 ? "+" : ""}
                   {formatCurrency(net)}
-                </span>
-              </div>
-              <div className="mt-1.5 h-2 rounded-full bg-gray-100 overflow-hidden">
-                <div
-                  className={`h-full rounded-full ${net >= 0 ? "bg-green-500" : "bg-red-500"}`}
-                  style={{
-                    width: `${income > 0 ? Math.min(100, Math.abs(rate)) : 0}%`,
-                  }}
-                />
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-600">Spent of income</span>
-                <span className="font-medium text-gray-900">
-                  {income > 0 ? formatPercent(100 - rate) : "—"}
-                </span>
-              </div>
-              <div className="mt-1.5 h-2 rounded-full bg-gray-100 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-red-500"
-                  style={{
-                    width: `${income > 0 ? Math.min(100, 100 - rate) : 0}%`,
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-          <dl className="mt-5 pt-4 border-t space-y-2 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Savings rate</dt>
-              <dd className="font-medium text-gray-900">
-                {income > 0 ? formatPercent(rate) : "—"}
-              </dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Average daily spend</dt>
-              <dd className="font-medium text-gray-900">
-                {formatCurrency(expense / Math.max(1, new Date().getDate()))}
-              </dd>
-            </div>
-          </dl>
-        </div>
+                </p>
+                <div className="metric-foot">Income minus spending</div>
+              </article>
+            </section>
 
-        {/* Top spending categories */}
-        <div className="bg-white rounded-lg shadow-sm border">
-          <div className="px-6 py-4 border-b">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Where the money went
-            </h2>
-            <p className="text-sm text-gray-500">
-              Top {spendBreakdown.length} spending{" "}
-              {spendBreakdown.length === 1 ? "category" : "categories"} this
-              month
-            </p>
-          </div>
-          <div className="p-6 space-y-4">
-            {spendBreakdown.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                No spending recorded for this month.
-              </p>
-            ) : (
-              spendBreakdown.map((slice) => (
-                <div key={slice.name}>
-                  <div className="flex justify-between text-sm">
-                    <span className="text-gray-700 font-medium">
-                      {slice.name}
-                    </span>
-                    <span className="text-gray-500">
-                      {formatCurrency(slice.amount)}
-                    </span>
+            <div className="insight-banner">
+              <span className="insight-symbol">
+                <FinanceIcon name="spark" />
+              </span>
+              <div>
+                <strong>
+                  {income > 0
+                    ? net >= 0
+                      ? `You kept ${formatPercent(rate)} of your income.`
+                      : "Spending exceeded your income."
+                    : expense > 0
+                      ? "Spending recorded. No income in this period."
+                      : "A fresh page for your finances."}
+                </strong>
+                <p>
+                  {income > 0
+                    ? net >= 0
+                      ? `${formatCurrency(net)} left after spending in ${period.label.toLowerCase()}.`
+                      : `${formatCurrency(Math.abs(net))} more went out than came in during this period.`
+                    : "Totals use transaction dates, even when you upload a receipt later."}
+                </p>
+              </div>
+              {!allTime && (
+                <button onClick={() => setAllTime(true)}>
+                  See all time <FinanceIcon name="arrow" />
+                </button>
+              )}
+            </div>
+
+            <div className="overview-chart-grid">
+              {/* Net position */}
+              <section className="overview-panel flow-panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">IN & OUT</p>
+                    <h2>Make sense of your cash flow</h2>
                   </div>
-                  <div className="mt-1.5 h-2 rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className="h-full rounded-full bg-red-400"
-                      style={{ width: `${slice.percent}%` }}
-                    />
-                  </div>
-                  <p className="mt-1 text-xs text-gray-400">
-                    {formatPercent(slice.percent)} of spending
-                  </p>
+                  <span className="subtle-badge">{period.label}</span>
                 </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Wallet distribution */}
-        <div className="bg-white rounded-lg shadow-sm border">
-          <div className="px-6 py-4 border-b">
-            <h2 className="text-lg font-semibold text-gray-900">
-              Wallet distribution
-            </h2>
-            <p className="text-sm text-gray-500">
-              Share of net worth by account
-            </p>
-          </div>
-          <div className="p-6 space-y-4">
-            {walletShare.length === 0 ? (
-              <p className="text-sm text-gray-500">
-                {wallets.length === 0
-                  ? "No wallets yet."
-                  : "No wallet holds a positive balance."}
-              </p>
-            ) : (
-              <>
-                <div className="flex h-2.5 rounded-full overflow-hidden bg-gray-100">
-                  {walletShare.map((s, i) => (
-                    <div
-                      key={s.name}
-                      className={`h-full ${chartColor(i)}`}
-                      style={{ width: `${s.percent}%` }}
-                      title={`${s.name} ${formatCurrency(s.amount)} · ${formatPercent(s.percent)}`}
-                    />
-                  ))}
-                </div>
-                <div className="mt-4 space-y-3">
-                  {walletShare.map((slice, i) => (
-                    <div key={slice.name}>
-                      <div className="flex justify-between text-sm">
-                        <span className="text-gray-700 font-medium inline-flex items-center gap-2">
-                          <span
-                            className={`w-2.5 h-2.5 rounded-sm ${chartColor(i)}`}
-                          />
-                          {slice.name}
-                        </span>
-                        <span className="text-gray-500">
-                          {formatCurrency(slice.amount)}
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-gray-400">
-                        {formatPercent(slice.percent)} of net worth
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Recent activity */}
-      <div className="bg-white rounded-lg shadow-sm border">
-        <div className="px-6 py-4 border-b">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Recent activity
-          </h2>
-          <p className="text-sm text-gray-500">
-            Your {recent.length} most recent{" "}
-            {recent.length === 1 ? "entry" : "entries"}
-          </p>
-        </div>
-        {recent.length === 0 ? (
-          <div className="px-6 py-10 text-center">
-            <p className="text-sm text-gray-500">
-              Nothing recorded yet. Add a transaction to see it here.
-            </p>
-            {unusedCategories.length === 0 && (
-              <p className="mt-1 text-xs text-gray-400">
-                {categories.length} categories ready to use
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="divide-y">
-            {recent.map((t) => {
-              const isIncome = t.category?.type === "INCOME";
-              return (
+                <p className="panel-description">
+                  What you earned, what you spent, and what stayed with you.
+                </p>
                 <div
-                  key={t.id}
-                  className="px-6 py-4 flex items-center justify-between"
+                  className="flow-chart"
+                  role="img"
+                  aria-label={`Income ${formatCurrency(income)}, spending ${formatCurrency(expense)}`}
                 >
-                  <div className="min-w-0">
-                    <p className="font-medium text-gray-900 truncate">
-                      {t.description || t.category?.name}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      {formatDateShort(t.transactionDate)} · {t.category?.name}{" "}
-                      · {t.wallet?.name}
-                    </p>
+                  <div className="flow-row">
+                    <div>
+                      <span>
+                        <i className="legend-dot income-dot" />
+                        Income
+                      </span>
+                      <strong>{formatCurrency(income)}</strong>
+                    </div>
+                    <div className="flow-track">
+                      <div
+                        className="flow-bar income-bar"
+                        style={{ width: `${(income / flowMax) * 100}%` }}
+                      />
+                    </div>
                   </div>
-                  <p
-                    className={`ml-4 font-semibold whitespace-nowrap ${
-                      isIncome ? "text-green-600" : "text-red-600"
-                    }`}
-                  >
-                    {isIncome ? "+" : "−"}
-                    {formatCurrency(Number(t.amount))}
+                  <div className="flow-row">
+                    <div>
+                      <span>
+                        <i className="legend-dot expense-dot" />
+                        Spending
+                      </span>
+                      <strong>{formatCurrency(expense)}</strong>
+                    </div>
+                    <div className="flow-track">
+                      <div
+                        className="flow-bar expense-bar"
+                        style={{ width: `${(expense / flowMax) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="flow-bottom">
+                  <div>
+                    <span>Income retained</span>
+                    <strong>{income > 0 ? formatPercent(rate) : "—"}</strong>
+                  </div>
+                  <p>
+                    {income > 0
+                      ? `For every Rp 100 earned, you spent Rp ${Math.round((expense / income) * 100).toLocaleString("id-ID")}.`
+                      : "Record income to see how much you retain."}
                   </p>
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+              </section>
+
+              {/* Top spending categories */}
+              <section className="overview-panel spending-panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">SPENDING BREAKDOWN</p>
+                    <h2>Where your money goes</h2>
+                  </div>
+                  <Link
+                    href="/dashboard/categories"
+                    className="icon-link"
+                    aria-label="View categories"
+                  >
+                    <FinanceIcon name="arrow" />
+                  </Link>
+                </div>
+                {slices.length ? (
+                  <>
+                    <div
+                      className="spending-donut"
+                      role="img"
+                      aria-label={slices
+                        .map(
+                          (slice) =>
+                            `${slice.name}: ${formatPercent(slice.percent)}`,
+                        )
+                        .join(", ")}
+                      style={{ background: `conic-gradient(${donut})` }}
+                    >
+                      <div>
+                        <span>Total spent</span>
+                        <strong>{formatCurrency(expense)}</strong>
+                      </div>
+                    </div>
+                    <div className="spending-legend">
+                      {slices.map((slice, index) => (
+                        <div key={slice.name}>
+                          <span>
+                            <i
+                              className="legend-dot"
+                              style={{ background: SPENDING_COLORS[index] }}
+                            />
+                            {slice.name}
+                          </span>
+                          <strong>{formatCurrency(slice.amount)}</strong>
+                          <span>{formatPercent(slice.percent, 0)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className="chart-empty">
+                    <span className="empty-ring">
+                      <FinanceIcon name="categories" />
+                    </span>
+                    <strong>No spending to break down</strong>
+                    <p>Add an expense or choose another period.</p>
+                  </div>
+                )}
+              </section>
+            </div>
+
+            <div className="overview-bottom-grid">
+              {/* Recent activity */}
+              <section className="overview-panel activity-panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">THE DETAILS</p>
+                    <h2>Recent activity</h2>
+                  </div>
+                  <Link href={transactionLink} className="text-action">
+                    View all <FinanceIcon name="arrow" />
+                  </Link>
+                </div>
+                <p className="panel-description">
+                  Latest entries in {period.label.toLowerCase()}, by transaction
+                  date.
+                </p>
+                {!data.recent.length ? (
+                  <div className="activity-empty">
+                    <FinanceIcon name="transactions" />
+                    <strong>No activity in this period</strong>
+                    <p>
+                      Your earlier transactions are still available under All
+                      time.
+                    </p>
+                    <button
+                      className="text-action"
+                      onClick={() => setAllTime(true)}
+                    >
+                      Show all-time activity <FinanceIcon name="arrow" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="activity-list">
+                    {data.recent.map((transaction) => {
+                      const incoming = transaction.category?.type === "INCOME";
+                      return (
+                        <div className="activity-row" key={transaction.id}>
+                          <span
+                            className={`activity-icon ${incoming ? "income-icon" : "expense-icon"}`}
+                          >
+                            <FinanceIcon name={incoming ? "down" : "up"} />
+                          </span>
+                          <div className="activity-description">
+                            <strong>
+                              {transaction.description ||
+                                transaction.category?.name ||
+                                "Transaction"}
+                            </strong>
+                            <span>
+                              {transaction.wallet?.name ?? "Wallet"}{" "}
+                              <span aria-hidden="true">·</span>{" "}
+                              {formatDateShort(transaction.transactionDate)}
+                            </span>
+                          </div>
+                          <div className="activity-amount">
+                            <strong className={incoming ? "income-text" : ""}>
+                              {incoming ? "+" : "−"}
+                              {formatCurrency(Number(transaction.amount))}
+                            </strong>
+                            <span>{transaction.category?.name}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </section>
+
+              {/* Wallet distribution */}
+              <section className="overview-panel wallets-panel">
+                <div className="panel-heading">
+                  <div>
+                    <p className="eyebrow">YOUR ACCOUNTS</p>
+                    <h2>Wallet balances</h2>
+                  </div>
+                  <Link
+                    href="/dashboard/wallets"
+                    className="icon-link"
+                    aria-label="Manage wallets"
+                  >
+                    <FinanceIcon name="arrow" />
+                  </Link>
+                </div>
+                <p className="panel-description">
+                  Current balances, across every period.
+                </p>
+                {!data.wallets.length ? (
+                  <div className="activity-empty">
+                    <FinanceIcon name="wallet" />
+                    <strong>A home for your money</strong>
+                    <p>Add your first wallet to start tracking.</p>
+                    <Link href="/dashboard/wallets" className="text-action">
+                      Add a wallet <FinanceIcon name="arrow" />
+                    </Link>
+                  </div>
+                ) : (
+                  <>
+                    <div className="wallet-list">
+                      {data.wallets.map((wallet, index) => (
+                        <div key={wallet.id}>
+                          <span
+                            className="wallet-monogram"
+                            style={{
+                              background: ["#e8eedb", "#f4e8d8", "#e8e7f1"][
+                                index % 3
+                              ],
+                            }}
+                          >
+                            {wallet.name.slice(0, 1).toUpperCase()}
+                          </span>
+                          <span>
+                            <strong>{wallet.name}</strong>
+                            <small>
+                              {wallet.type.replace(/_/g, " ").toLowerCase()}
+                            </small>
+                          </span>
+                          <strong
+                            className={
+                              Number(wallet.balance) < 0 ? "expense-text" : ""
+                            }
+                          >
+                            {formatCurrency(Number(wallet.balance))}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="wallet-note">
+                      <FinanceIcon name="spark" />
+                      <span>
+                        {negativeWallets
+                          ? `${negativeWallets} ${negativeWallets === 1 ? "wallet has a negative balance" : "wallets have negative balances"}. Review your account activity.`
+                          : "Balances include your starting amounts and all recorded transactions."}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </section>
+            </div>
+          </>
+        )
+      )}
     </div>
   );
 }

@@ -21,6 +21,7 @@ Thumbs.db
 .idea
 *.tsbuildinfo
 **/*.tsbuildinfo
+**/__pycache__
 docker-compose*.yml
 docker-compose*.yaml
 Dockerfile

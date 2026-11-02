@@ -16,12 +16,24 @@ export default function TransactionsPage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [queryReady, setQueryReady] = useState(false);
   const [filters, setFilters] = useState({
     walletId: "",
     categoryId: "",
     startDate: "",
     endDate: "",
   });
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setFilters({
+      walletId: params.get("walletId") ?? "",
+      categoryId: params.get("categoryId") ?? "",
+      startDate: params.get("startDate")?.slice(0, 10) ?? "",
+      endDate: params.get("endDate")?.slice(0, 10) ?? "",
+    });
+    setQueryReady(true);
+  }, []);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -40,30 +52,38 @@ export default function TransactionsPage() {
   }, []);
 
   useEffect(() => {
+    if (!queryReady) return;
+    let cancelled = false;
     const fetchTransactions = async () => {
       setIsLoading(true);
+      setError("");
       try {
         const params: Record<string, string> = {};
         if (filters.walletId) params.walletId = filters.walletId;
         if (filters.categoryId) params.categoryId = filters.categoryId;
         if (filters.startDate) params.startDate = filters.startDate;
-        if (filters.endDate) params.endDate = filters.endDate;
+        if (filters.endDate)
+          params.endDate = `${filters.endDate}T23:59:59.999Z`;
 
         const data = await transactionsApi.list(params);
-        setTransactions(data);
+        if (!cancelled) setTransactions(data);
       } catch (err: unknown) {
-        setError(
-          err instanceof ApiError
-            ? `${err.statusCode} ${err.errorMsg}: ${err.message}`
-            : "Failed to load transactions",
-        );
+        if (!cancelled)
+          setError(
+            err instanceof ApiError
+              ? `${err.statusCode} ${err.errorMsg}: ${err.message}`
+              : "Failed to load transactions",
+          );
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     fetchTransactions();
-  }, [filters]);
+    return () => {
+      cancelled = true;
+    };
+  }, [filters, queryReady]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this transaction?")) return;

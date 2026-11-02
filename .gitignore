@@ -57,3 +57,4 @@ Thumbs.db
 *.pem
 *.tsbuildinfo
 .eslintcache
+__pycache__/

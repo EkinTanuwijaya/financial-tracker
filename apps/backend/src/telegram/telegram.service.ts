@@ -632,6 +632,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       return;
     }
 
+    this.pendingConfirmations.delete(message.chat.id);
+
     const fileId = message.photo?.[message.photo.length - 1]?.file_id ?? message.document?.file_id;
     if (!fileId) {
       await this.sendMessage(message.chat.id, "Could not get file from message.");
@@ -687,6 +689,22 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         const isIncome = extraction.type === "INCOME";
         const sign = isIncome ? "+" : "-";
 
+        const [wallet, category] = await Promise.all([
+          extraction.wallet?.trim() ? this.wallets.findByName(user.id, extraction.wallet) : null,
+          extraction.category?.trim() ? this.categories.findByName(user.id, extraction.category) : null,
+        ]);
+        if (!wallet || !category) {
+          await this.sendMessage(
+            message.chat.id,
+            `Receipt amount: ${sign}Rp ${extraction.amount.toLocaleString("id-ID")}\n` +
+              `Date: ${extraction.date ?? "(not detected)"}\n\n` +
+              `Cannot save yet: ${[!wallet && "wallet not matched", !category && "category not matched"].filter(Boolean).join(", ")}.\n` +
+              `Check /wallets and /category. Create missing entries with /wallet add <name> and /category add <name>.\n` +
+              `Then resend the receipt with a caption naming the wallet and category.`,
+          );
+          return;
+        }
+
         await this.sendMessage(
           message.chat.id,
           `Receipt processed! 📄\n\n` +
@@ -699,8 +717,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
         this.pendingConfirmations.set(message.chat.id, {
           userId: user.id,
-          walletId: (await this.wallets.findByName(user.id, extraction.wallet))?.id ?? "",
-          categoryId: (await this.categories.findByName(user.id, extraction.category))?.id ?? "",
+          walletId: wallet.id,
+          categoryId: category.id,
           amount: extraction.amount,
           description: extraction.description ?? "",
           date: extraction.date ? new Date(extraction.date) : new Date(),

@@ -3,9 +3,8 @@ FROM node:20-alpine
 
 WORKDIR /app
 
-# Prisma needs OpenSSL on Alpine. Tesseract OCR for receipt processing.
-# Sharp needs libvips for image preprocessing
-RUN apk add --no-cache openssl libc6-compat tesseract-ocr tesseract-ocr-data-eng tesseract-ocr-data-ind vips-dev
+# Prisma needs OpenSSL on Alpine. PaddleOCR runs in its own Python service.
+RUN apk add --no-cache openssl libc6-compat
 
 # Install pnpm (corepack ships the correct binary for this platform)
 RUN corepack enable && corepack prepare pnpm@9.0.0 --activate

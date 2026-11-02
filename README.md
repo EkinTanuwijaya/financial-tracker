@@ -51,8 +51,7 @@ pnpm db:generate
 # Push database schema
 pnpm db:push
 
-# Seed default categories (after creating a user)
-# pnpm --filter @finance-tracker/backend run seed:categories
+# Each new account automatically receives default expense and income categories.
 
 # Start development servers
 pnpm dev

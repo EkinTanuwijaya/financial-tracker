@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { PrismaService } from "../common/prisma/prisma.service";
+import { DEFAULT_CATEGORIES } from "./default-categories";
 
 @Injectable()
 export class CategoriesService {
@@ -51,18 +52,7 @@ export class CategoriesService {
   }
 
   async seedDefaults(userId: string) {
-    const defaults = [
-      { name: "Food", type: "EXPENSE" },
-      { name: "Transport", type: "EXPENSE" },
-      { name: "Shopping", type: "EXPENSE" },
-      { name: "Entertainment", type: "EXPENSE" },
-      { name: "Bills", type: "EXPENSE" },
-      { name: "Health", type: "EXPENSE" },
-      { name: "Salary", type: "INCOME" },
-      { name: "Other", type: "EXPENSE" },
-    ];
-
-    for (const cat of defaults) {
+    for (const cat of DEFAULT_CATEGORIES) {
       await this.prisma.category.upsert({
         where: { userId_name: { userId, name: cat.name } },
         update: {},

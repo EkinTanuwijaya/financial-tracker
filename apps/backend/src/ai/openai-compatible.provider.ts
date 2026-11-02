@@ -1,4 +1,5 @@
 import { AiProvider, AiConfig } from "./ai.interface";
+import { GeminiProvider } from "./gemini.provider";
 
 function schemaToFunction(
   schema: Record<string, unknown>,
@@ -149,6 +150,8 @@ export class OpenAiCompatibleProvider implements AiProvider {
 
 export function createProvider(config: AiConfig): AiProvider {
   switch (config.provider) {
+    case "gemini":
+      return new GeminiProvider(config);
     case "openai":
     case "9router":
     case "groq":
