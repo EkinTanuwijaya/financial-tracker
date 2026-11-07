@@ -42,35 +42,37 @@ export class OpenAiCompatibleProvider implements AiProvider {
     let lastError: Error | null = null;
 
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+      const signal = AbortSignal.timeout(Number(this.timeoutMs));
+      let status: number | undefined;
 
       try {
-        const response = await fetch(`${this.baseUrl}/chat/completions`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${this.apiKey}`,
+        const response = await fetch(
+          `${this.baseUrl.replace(/\/$/, "")}/chat/completions`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${this.apiKey}`,
+            },
+            body: JSON.stringify({
+              model: this.model,
+              messages: [
+                {
+                  role: "system",
+                  content:
+                    "You are a precise data extraction engine. Output only valid JSON matching the provided schema. No explanations, no markdown, no extra text.",
+                },
+                { role: "user", content: prompt },
+              ],
+              tools: [{ type: "function", function: schemaToFunction(schema) }],
+              tool_choice: { type: "function", function: { name: "extract" } },
+              temperature: 0,
+            }),
+            signal,
           },
-          body: JSON.stringify({
-            model: this.model,
-            messages: [
-              {
-                role: "system",
-                content:
-                  "You are a precise data extraction engine. Output only valid JSON matching the provided schema. No explanations, no markdown, no extra text.",
-              },
-              { role: "user", content: prompt },
-            ],
-            tools: [{ type: "function", function: schemaToFunction(schema) }],
-            tool_choice: { type: "function", function: { name: "extract" } },
-            temperature: 0,
-          }),
-          signal: controller.signal,
-        });
+        );
 
-        clearTimeout(timeout);
-
+        status = response.status;
         if (!response.ok) {
           let text = "";
           try {
@@ -92,7 +94,9 @@ export class OpenAiCompatibleProvider implements AiProvider {
           data = await response.json();
         } catch {
           const text = await response.text().catch(() => "");
-          throw new Error(`AI provider returned non-JSON: ${text.slice(0, 200)}`);
+          throw new Error(
+            `AI provider returned non-JSON: ${text.slice(0, 200)}`,
+          );
         }
 
         const call =
@@ -112,12 +116,13 @@ export class OpenAiCompatibleProvider implements AiProvider {
 
         throw new Error("No function call or valid JSON returned by the model");
       } catch (err) {
-        clearTimeout(timeout);
         lastError = err as Error;
 
-        if (err instanceof DOMException && err.name === "AbortError") {
+        if (signal.aborted) {
           throw new Error(`AI request timed out after ${this.timeoutMs}ms`);
         }
+
+        if (status !== undefined && status !== 429 && status < 500) throw err;
 
         // Retry on network errors
         if (attempt < this.maxRetries) {
@@ -134,13 +139,14 @@ export class OpenAiCompatibleProvider implements AiProvider {
 
   async healthCheck(): Promise<boolean> {
     try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 5_000);
-      const response = await fetch(`${this.baseUrl}/models`, {
-        headers: { Authorization: `Bearer ${this.apiKey}` },
-        signal: controller.signal,
-      });
-      clearTimeout(timeout);
+      const signal = AbortSignal.timeout(5_000);
+      const response = await fetch(
+        `${this.baseUrl.replace(/\/$/, "")}/models`,
+        {
+          headers: { Authorization: `Bearer ${this.apiKey}` },
+          signal,
+        },
+      );
       return response.ok;
     } catch {
       return false;
@@ -149,6 +155,8 @@ export class OpenAiCompatibleProvider implements AiProvider {
 }
 
 export function createProvider(config: AiConfig): AiProvider {
+  if (config.provider === "9router" && !config.baseUrl)
+    throw new Error("AI_BASE_URL is required for 9router");
   switch (config.provider) {
     case "gemini":
       return new GeminiProvider(config);
@@ -157,7 +165,10 @@ export function createProvider(config: AiConfig): AiProvider {
     case "groq":
       return new OpenAiCompatibleProvider(
         config.apiKey,
-        config.baseUrl ?? "https://api.openai.com/v1",
+        config.baseUrl ??
+          (config.provider === "groq"
+            ? "https://api.groq.com/openai/v1"
+            : "https://api.openai.com/v1"),
         config.model,
         config.timeoutMs,
         2, // maxRetries

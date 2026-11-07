@@ -2,6 +2,7 @@ import { Injectable, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { AiProvider, AiConfig } from "./ai.interface";
 import { createProvider } from "./openai-compatible.provider";
+import { jakartaDate } from "../common/calendar-date";
 
 /** The exact shape we want the LLM to return for a transaction. */
 export const TRANSACTION_SCHEMA = {
@@ -104,7 +105,7 @@ export class AiService implements OnModuleInit {
       ? `\nYour categories: ${context.categories.join(", ")}`
       : "";
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = jakartaDate();
 
     // Define alias mappings
     const aliasMap: Record<string, string[]> = {
@@ -123,10 +124,14 @@ export class AiService implements OnModuleInit {
     const activeAliases: string[] = [];
     for (const [wallet, aliases] of Object.entries(aliasMap)) {
       if (userWallets.some((w) => w.toLowerCase() === wallet.toLowerCase())) {
-        activeAliases.push(`  * ${aliases.map((a) => `"${a}"`).join(" / ")} → "${wallet}"`);
+        activeAliases.push(
+          `  * ${aliases.map((a) => `"${a}"`).join(" / ")} → "${wallet}"`,
+        );
       }
     }
-    const aliasText = activeAliases.length ? `\n- Wallet aliases:\n${activeAliases.join("\n")}` : "";
+    const aliasText = activeAliases.length
+      ? `\n- Wallet aliases:\n${activeAliases.join("\n")}`
+      : "";
 
     const captionText = caption ? `\nUser note (caption): "${caption}"` : "";
 
@@ -144,7 +149,27 @@ Rules:
 - Convert DD/MM/YYYY, DD-MM-YYYY, DD MMM YYYY to YYYY-MM-DD. Months: Jan/Feb/Mar/Apr/Mei/Jun/Jul/Ags/Sep/Okt/Nov/Des.
 - Missing receipt date: null. Today is ${today}; use only for explicit today/hari ini.`;
 
-    return this.provider.complete<TransactionExtraction>(prompt, TRANSACTION_SCHEMA);
+    const result = await this.provider.complete<TransactionExtraction>(
+      prompt,
+      TRANSACTION_SCHEMA,
+    );
+    if (!result) return null;
+    if (
+      typeof result !== "object" ||
+      Array.isArray(result) ||
+      !Number.isFinite(result.amount) ||
+      result.amount <= 0 ||
+      typeof result.wallet !== "string" ||
+      typeof result.category !== "string" ||
+      (result.currency !== undefined && result.currency !== "IDR") ||
+      (result.description != null && typeof result.description !== "string") ||
+      (result.date != null && typeof result.date !== "string") ||
+      (result.type !== undefined &&
+        !["EXPENSE", "INCOME"].includes(result.type))
+    ) {
+      throw new Error("AI returned invalid transaction data");
+    }
+    return { ...result, currency: "IDR" };
   }
 
   async healthCheck(): Promise<boolean> {
@@ -153,7 +178,11 @@ Rules:
 
   async classifyMessage(text: string): Promise<MessageClassification> {
     if (!this.provider) {
-      return { isTransaction: false, confidence: 0, reason: "AI not available" };
+      return {
+        isTransaction: false,
+        confidence: 0,
+        reason: "AI not available",
+      };
     }
 
     const prompt = `Classify if this message is a financial transaction request.
@@ -167,7 +196,23 @@ Rules:
 - "lunch 50k bca", "gaji 5jt masuk", "beli kopi 25rb tunai" → IS a transaction.
 - Respond with JSON only.`;
 
-    const result = await this.provider.complete<MessageClassification>(prompt, CLASSIFICATION_SCHEMA);
-    return result ?? { isTransaction: false, confidence: 0, reason: "Classification failed" };
+    const result = await this.provider.complete<MessageClassification>(
+      prompt,
+      CLASSIFICATION_SCHEMA,
+    );
+    if (
+      !result ||
+      typeof result.isTransaction !== "boolean" ||
+      !Number.isFinite(result.confidence) ||
+      result.confidence < 0 ||
+      result.confidence > 1
+    ) {
+      return {
+        isTransaction: false,
+        confidence: 0,
+        reason: "Invalid classification",
+      };
+    }
+    return result;
   }
 }

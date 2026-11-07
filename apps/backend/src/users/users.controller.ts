@@ -1,3 +1,4 @@
+import { ProfileDto, TelegramLinkDto } from "../common/request.dto";
 import {
   Controller,
   Get,
@@ -43,7 +44,7 @@ export class UsersController {
   @ApiOperation({ summary: "Update the current user's profile" })
   async updateMe(
     @Request() req: { user: { id: string } },
-    @Body() body: { name?: string; email?: string },
+    @Body() body: ProfileDto,
   ) {
     // Scoped to req.user.id, so a user id in the body cannot be used to edit
     // someone else. telegramId is not accepted here: link/unlink own it.
@@ -55,9 +56,9 @@ export class UsersController {
   @ApiOperation({ summary: "Link the current user to a Telegram account" })
   async linkTelegram(
     @Request() req: { user: { id: string } },
-    @Body() body: { telegramId: string },
+    @Body() body: TelegramLinkDto,
   ) {
-    return this.usersService.linkTelegram(req.user.id, body.telegramId);
+    return this.usersService.linkTelegram(req.user.id, body.code);
   }
 
   @Delete("telegram/link")

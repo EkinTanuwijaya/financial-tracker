@@ -2,7 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { categoriesApi, transactionsApi } from "@/lib/api";
-import { formatCurrency, formatPercent, topCategories } from "@/lib/utils";
+import {
+  formatCurrency,
+  formatPercent,
+  topCategories,
+  dateInputValue,
+} from "@/lib/utils";
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<any[]>([]);
@@ -27,15 +32,17 @@ export default function CategoriesPage() {
           categoriesApi.list(),
           transactionsApi
             .summary({
-              startDate: monthStart.toISOString().split("T")[0],
-              endDate: now.toISOString().split("T")[0],
+              startDate: dateInputValue(monthStart),
+              endDate: dateInputValue(now),
             })
             .catch(() => null),
         ]);
         setCategories(data);
         setSummary(summaryData);
       } catch (error) {
-        console.error("Failed to load categories:", error);
+        setError(
+          error instanceof Error ? error.message : "Failed to load categories",
+        );
       } finally {
         setIsLoading(false);
       }
@@ -198,6 +205,15 @@ export default function CategoriesPage() {
             </>
           )}
         </div>
+      )}
+
+      {!showForm && error && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+        >
+          {error}
+        </p>
       )}
 
       {showForm && (

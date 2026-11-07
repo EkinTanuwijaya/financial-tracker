@@ -157,3 +157,15 @@ export function chartColor(index: number): string {
 export function chartSoftColor(index: number): string {
   return CHART_SOFT_COLORS[index % CHART_SOFT_COLORS.length];
 }
+
+export function dateInputValue(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat("en", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const value = (type: string) =>
+    parts.find((part) => part.type === type)!.value;
+  return `${value("year")}-${value("month")}-${value("day")}`;
+}

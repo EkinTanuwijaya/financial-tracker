@@ -5,14 +5,17 @@ import {
 } from "@nestjs/common";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { DEFAULT_CATEGORIES } from "../categories/default-categories";
+import { Prisma } from "@prisma/client";
+import { TelegramLinkService } from "./telegram-link.service";
 
-// Telegram user IDs are positive integers. The current range is well under
-// 13 digits, so anything outside this is a typo rather than a real ID.
-const TELEGRAM_ID_PATTERN = /^\d{5,15}$/;
+// A bot-issued pairing code proves access to the Telegram account being linked.
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private telegramLinks: TelegramLinkService,
+  ) {}
 
   /**
    * The only user fields allowed to leave the backend. Enforced here rather
@@ -41,11 +44,60 @@ export class UsersService {
   }
 
   async emailExists(email: string): Promise<boolean> {
-    const found = await this.prisma.user.findUnique({
-      where: { email },
+    const found = await this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
       select: { id: true },
     });
     return found !== null;
+  }
+
+  async findOrCreateGoogleUser(data: {
+    googleId: string;
+    email: string;
+    name?: string;
+  }) {
+    return this.prisma
+      .$transaction(async (tx) => {
+        const linked = await tx.user.findUnique({
+          where: { googleId: data.googleId },
+          select: UsersService.PUBLIC_SELECT,
+        });
+        if (linked) return linked;
+
+        const existing = await tx.user.findFirst({
+          where: { email: { equals: data.email, mode: "insensitive" } },
+          select: { id: true, googleId: true },
+        });
+        if (existing) {
+          // Password accounts do not verify email, so email alone cannot authorize linking.
+          throw new ConflictException(
+            "This email already has an account. Sign in with your existing method.",
+          );
+        }
+
+        return tx.user.upsert({
+          where: { googleId: data.googleId },
+          update: {},
+          create: {
+            googleId: data.googleId,
+            email: data.email,
+            name: data.name,
+            categories: { create: DEFAULT_CATEGORIES },
+          },
+          select: UsersService.PUBLIC_SELECT,
+        });
+      })
+      .catch((error: unknown) => {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2002"
+        ) {
+          throw new ConflictException(
+            "Account was updated by another sign-in. Please try again.",
+          );
+        }
+        throw error;
+      });
   }
 
   /**
@@ -54,8 +106,8 @@ export class UsersService {
    * named to make an accidental call site obvious.
    */
   async findCredentialsByEmail(email: string) {
-    return this.prisma.user.findUnique({
-      where: { email },
+    return this.prisma.user.findFirst({
+      where: { email: { equals: email, mode: "insensitive" } },
       select: { id: true, email: true, name: true, passwordHash: true },
     });
   }
@@ -82,7 +134,7 @@ export class UsersService {
   async update(id: string, data: Partial<{ name: string; email: string }>) {
     return this.prisma.user.update({
       where: { id },
-      data,
+      data: { name: data.name, email: data.email },
       select: UsersService.PUBLIC_SELECT,
     });
   }
@@ -97,15 +149,8 @@ export class UsersService {
     });
   }
 
-  async linkTelegram(userId: string, rawTelegramId: string) {
-    const telegramId = String(rawTelegramId ?? "").trim();
-
-    if (!TELEGRAM_ID_PATTERN.test(telegramId)) {
-      throw new BadRequestException(
-        "That does not look like a Telegram ID. It should be the number the " +
-          "bot replies with, for example 123456789.",
-      );
-    }
+  async linkTelegram(userId: string, code: string) {
+    const telegramId = await this.telegramLinks.consume(code);
 
     const owner = await this.prisma.user.findUnique({
       where: { telegramId },

@@ -37,7 +37,9 @@ export default function WalletsPage() {
         const data = await walletsApi.list();
         setWallets(data);
       } catch (error) {
-        console.error("Failed to load wallets:", error);
+        setError(
+          error instanceof Error ? error.message : "Failed to load wallets",
+        );
       } finally {
         setIsLoading(false);
       }
@@ -154,6 +156,15 @@ export default function WalletsPage() {
           + Add wallet
         </button>
       </div>
+
+      {!showForm && error && (
+        <p
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700"
+        >
+          {error}
+        </p>
+      )}
 
       {/* Net worth */}
       {wallets.length > 0 && (

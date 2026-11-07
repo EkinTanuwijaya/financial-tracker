@@ -1,3 +1,5 @@
+import { NotFoundException } from "@nestjs/common";
+import { CreateCategoryDto, UpdateCategoryDto } from "../common/request.dto";
 import {
   Controller,
   Get,
@@ -23,10 +25,7 @@ export class CategoriesController {
 
   @Post()
   @ApiOperation({ summary: "Create a new category" })
-  async create(
-    @Body() body: { name: string; type: string },
-    @Request() req: any,
-  ) {
+  async create(@Body() body: CreateCategoryDto, @Request() req: any) {
     return this.categoriesService.create(req.user.id, body);
   }
 
@@ -45,7 +44,9 @@ export class CategoriesController {
   @Get(":id")
   @ApiOperation({ summary: "Get category by ID" })
   async findById(@Param("id") id: string, @Request() req: any) {
-    return this.categoriesService.findById(id, req.user.id);
+    const category = await this.categoriesService.findById(id, req.user.id);
+    if (!category) throw new NotFoundException("Category not found");
+    return category;
   }
 
   @Patch(":id")
@@ -53,7 +54,7 @@ export class CategoriesController {
   async update(
     @Param("id") id: string,
     @Request() req: any,
-    @Body() body: Partial<{ name: string; type: string }>,
+    @Body() body: UpdateCategoryDto,
   ) {
     return this.categoriesService.update(id, req.user.id, body);
   }

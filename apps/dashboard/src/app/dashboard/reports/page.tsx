@@ -61,7 +61,7 @@ function getPeriodRange(period: ReportPeriod): PeriodRange {
         label: "This year",
         dateRangeLabel: String(now.getFullYear()),
         daysElapsed:
-          Math.ceil((now.getTime() - jan1.getTime()) / 86_400_000) + 1,
+          Math.floor((now.getTime() - jan1.getTime()) / 86_400_000) + 1,
       };
     }
     case "all":

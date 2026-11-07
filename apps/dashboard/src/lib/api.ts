@@ -1,4 +1,7 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+let authRevision = 0;
+export const currentAuthRevision = () => authRevision;
+export const invalidateAuthRequests = () => ++authRevision;
 
 export class ApiError extends Error {
   statusCode: number;
@@ -16,19 +19,26 @@ export async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
-
+  const revision = authRevision;
   const response = await fetch(`${API_URL}/api${endpoint}`, {
+    ...options,
+    credentials: "include",
+    signal: options.signal ?? AbortSignal.timeout(30000),
     headers: {
       "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
       ...options.headers,
     },
-    ...options,
   });
 
   if (!response.ok) {
+    if (
+      response.status === 401 &&
+      typeof window !== "undefined" &&
+      revision === authRevision &&
+      !["/auth/login", "/auth/register", "/auth/google"].includes(endpoint)
+    ) {
+      window.dispatchEvent(new Event("auth:expired"));
+    }
     const body = await response.json().catch(() => null);
 
     const statusCode = body?.statusCode ?? response.status;
@@ -49,18 +59,27 @@ export async function apiRequest<T>(
 
 export const authApi = {
   register: (data: { email: string; password: string; name?: string }) =>
-    apiRequest<{ user: any; token: string }>("/auth/register", {
+    apiRequest<{ user: any }>("/auth/register", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
   login: (data: { email: string; password: string }) =>
-    apiRequest<{ user: any; token: string }>("/auth/login", {
+    apiRequest<{ user: any }>("/auth/login", {
       method: "POST",
       body: JSON.stringify(data),
     }),
 
+  google: (credential: string) =>
+    apiRequest<{ user: any }>("/auth/google", {
+      method: "POST",
+      body: JSON.stringify({ credential }),
+    }),
+
   me: () => apiRequest<any>("/auth/me"),
+  activity: () =>
+    apiRequest<{ ok: boolean }>("/auth/activity", { method: "POST" }),
+  logout: () => apiRequest<{ ok: boolean }>("/auth/logout", { method: "POST" }),
 };
 
 export const telegramApi = {
@@ -71,12 +90,12 @@ export const telegramApi = {
 };
 
 export const usersApi = {
-  linkTelegram: (telegramId: string) =>
+  linkTelegram: (code: string) =>
     apiRequest<{ id: string; email: string; telegramId: string }>(
       "/users/telegram/link",
       {
         method: "POST",
-        body: JSON.stringify({ telegramId }),
+        body: JSON.stringify({ code }),
       },
     ),
 

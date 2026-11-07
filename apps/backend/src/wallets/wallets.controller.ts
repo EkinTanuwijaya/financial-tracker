@@ -1,3 +1,5 @@
+import { NotFoundException } from "@nestjs/common";
+import { CreateWalletDto, UpdateWalletDto } from "../common/request.dto";
 import {
   Controller,
   Get,
@@ -24,7 +26,7 @@ export class WalletsController {
   @ApiOperation({ summary: "Create a new wallet" })
   async create(
     @Body()
-    body: { name: string; type: string; currency?: string; balance?: number },
+    body: CreateWalletDto,
     @Request() req: any,
   ) {
     return this.walletsService.create(req.user.id, body);
@@ -39,7 +41,9 @@ export class WalletsController {
   @Get(":id")
   @ApiOperation({ summary: "Get wallet by ID" })
   async findById(@Param("id") id: string, @Request() req: any) {
-    return this.walletsService.findById(id, req.user.id);
+    const wallet = await this.walletsService.findById(id, req.user.id);
+    if (!wallet) throw new NotFoundException("Wallet not found");
+    return wallet;
   }
 
   @Patch(":id")
@@ -48,12 +52,7 @@ export class WalletsController {
     @Param("id") id: string,
     @Request() req: any,
     @Body()
-    body: Partial<{
-      name: string;
-      type: string;
-      currency: string;
-      balance: number;
-    }>,
+    body: UpdateWalletDto,
   ) {
     return this.walletsService.update(id, req.user.id, body);
   }

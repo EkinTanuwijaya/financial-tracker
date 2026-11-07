@@ -117,6 +117,29 @@ export default function DashboardPage() {
 
   return (
     <div className="overview-page">
+      {!isLoading && !error && data?.wallets.length === 0 && (
+        <div
+          role="status"
+          aria-label="Wallet setup"
+          className="mb-6 flex flex-col gap-4 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900 sm:flex-row sm:items-center"
+        >
+          <FinanceIcon name="wallet" className="shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold">Add your first wallet</p>
+            <p className="mt-1 text-sm">
+              Create a cash, bank, or e-wallet account before recording
+              transactions.
+            </p>
+          </div>
+          <Link
+            href="/dashboard/wallets"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-amber-900 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-950"
+          >
+            <FinanceIcon name="plus" width={16} height={16} />
+            Add wallet
+          </Link>
+        </div>
+      )}
       <div className="overview-heading">
         <div>
           <p className="eyebrow">THE BIG PICTURE</p>

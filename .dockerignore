@@ -22,6 +22,12 @@ Thumbs.db
 *.tsbuildinfo
 **/*.tsbuildinfo
 **/__pycache__
+test-results
+playwright-report
+blob-report
+.kilo
+.codex
+.agents
 docker-compose*.yml
 docker-compose*.yaml
 Dockerfile

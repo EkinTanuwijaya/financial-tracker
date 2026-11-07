@@ -1,3 +1,4 @@
+import { jakartaDate } from "../common/calendar-date";
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export function formatRupiah(amount: number): string {
@@ -99,6 +100,7 @@ export const HELP_TEXT = [
   "/category add <name> [expense|income] - create a category",
   "/report [week|month|year|all] - send a PDF report",
   "/whoami - show which account this chat is linked to",
+  "/link - get a one-time dashboard pairing code",
   "/help - show this message",
   "",
   "Dates: today, yesterday, 2026-09-29 or 29-09-2026.",
@@ -379,7 +381,7 @@ function addDays(date: Date, days: number): Date {
 }
 
 function startOfUtcDay(now: Date): Date {
-  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
+  return new Date(`${jakartaDate(now)}T00:00:00.000Z`);
 }
 
 /**

@@ -1,3 +1,9 @@
+import { NotFoundException } from "@nestjs/common";
+import {
+  CreateReceiptDto,
+  ReceiptStatusDto,
+  ReceiptLinkDto,
+} from "../common/request.dto";
 import {
   Controller,
   Get,
@@ -21,7 +27,7 @@ export class ReceiptsController {
 
   @Post()
   @ApiOperation({ summary: "Create a new receipt record" })
-  async create(@Body() body: { fileUrl: string }, @Request() req: any) {
+  async create(@Body() body: CreateReceiptDto, @Request() req: any) {
     return this.receiptsService.create(req.user.id, body);
   }
 
@@ -34,7 +40,9 @@ export class ReceiptsController {
   @Get(":id")
   @ApiOperation({ summary: "Get receipt by ID" })
   async findById(@Param("id") id: string, @Request() req: any) {
-    return this.receiptsService.findById(id, req.user.id);
+    const receipt = await this.receiptsService.findById(id, req.user.id);
+    if (!receipt) throw new NotFoundException("Receipt not found");
+    return receipt;
   }
 
   @Patch(":id/status")
@@ -42,13 +50,14 @@ export class ReceiptsController {
   async updateStatus(
     @Param("id") id: string,
     @Request() req: any,
-    @Body() body: { status: string; extractedData?: any; rawText?: string },
+    @Body() body: ReceiptStatusDto,
   ) {
     return this.receiptsService.updateProcessingStatus(
       id,
       body.status,
       body.extractedData,
       body.rawText,
+      req.user.id,
     );
   }
 
@@ -57,8 +66,12 @@ export class ReceiptsController {
   async linkTransaction(
     @Param("id") id: string,
     @Request() req: any,
-    @Body() body: { transactionId: string },
+    @Body() body: ReceiptLinkDto,
   ) {
-    return this.receiptsService.linkTransaction(id, body.transactionId);
+    return this.receiptsService.linkTransaction(
+      id,
+      body.transactionId,
+      req.user.id,
+    );
   }
 }

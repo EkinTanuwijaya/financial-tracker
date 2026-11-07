@@ -1,4 +1,8 @@
-import { Injectable } from "@nestjs/common";
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { DEFAULT_CATEGORIES } from "./default-categories";
 
@@ -39,9 +43,22 @@ export class CategoriesService {
     userId: string,
     data: Partial<{ name: string; type: string }>,
   ) {
-    return this.prisma.category.update({
-      where: { id, userId },
-      data,
+    return this.prisma.serializable(async (tx) => {
+      const category = await tx.category.findFirst({ where: { id, userId } });
+      if (!category) throw new NotFoundException("Category not found");
+      if (
+        data.type &&
+        data.type !== category.type &&
+        (await tx.transaction.count({ where: { categoryId: id } }))
+      ) {
+        throw new ConflictException(
+          "Cannot change the type of a category with transactions. Create a new category instead.",
+        );
+      }
+      return tx.category.update({
+        where: { id, userId },
+        data: { name: data.name, type: data.type },
+      });
     });
   }
 
@@ -52,13 +69,10 @@ export class CategoriesService {
   }
 
   async seedDefaults(userId: string) {
-    for (const cat of DEFAULT_CATEGORIES) {
-      await this.prisma.category.upsert({
-        where: { userId_name: { userId, name: cat.name } },
-        update: {},
-        create: { ...cat, userId },
-      });
-    }
+    await this.prisma.category.createMany({
+      data: DEFAULT_CATEGORIES.map((category) => ({ ...category, userId })),
+      skipDuplicates: true,
+    });
 
     return this.findAll(userId);
   }

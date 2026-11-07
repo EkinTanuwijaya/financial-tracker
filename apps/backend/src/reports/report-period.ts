@@ -1,3 +1,4 @@
+import { jakartaDate } from "../common/calendar-date";
 // Report periods for the Telegram /report command.
 // Boundaries are UTC and the week starts Monday, matching
 // the bot's other date handling (see parseRelativeDate).
@@ -64,16 +65,32 @@ const LONG_MONTH = new Intl.DateTimeFormat("id-ID", {
 
 function endOfDayUtc(date: Date): Date {
   return new Date(
-    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate(), 23, 59, 59, 999),
+    Date.UTC(
+      date.getUTCFullYear(),
+      date.getUTCMonth(),
+      date.getUTCDate(),
+      23,
+      59,
+      59,
+      999,
+    ),
   );
 }
 
-export function getReportRange(period: ReportPeriod, now = new Date()): ReportRange {
+export function getReportRange(
+  period: ReportPeriod,
+  now = new Date(),
+): ReportRange {
+  now = new Date(`${jakartaDate(now)}T00:00:00.000Z`);
   switch (period) {
     case "week": {
       const mondayOffset = (now.getUTCDay() + 6) % 7;
       const start = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - mondayOffset),
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth(),
+          now.getUTCDate() - mondayOffset,
+        ),
       );
       return {
         period,
@@ -97,7 +114,9 @@ export function getReportRange(period: ReportPeriod, now = new Date()): ReportRa
       return { period, label: "All time", dateRangeLabel: "All time" };
     case "month":
     default: {
-      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+      const start = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+      );
       return {
         period,
         label: "This month",

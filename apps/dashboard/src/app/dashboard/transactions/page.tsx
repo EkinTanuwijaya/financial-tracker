@@ -16,6 +16,9 @@ export default function TransactionsPage() {
   const [categories, setCategories] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [revision, setRevision] = useState(0);
   const [queryReady, setQueryReady] = useState(false);
   const [filters, setFilters] = useState({
     walletId: "",
@@ -23,6 +26,11 @@ export default function TransactionsPage() {
     startDate: "",
     endDate: "",
   });
+
+  const changeFilters = (value: typeof filters) => {
+    setOffset(0);
+    setFilters(value);
+  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -58,7 +66,10 @@ export default function TransactionsPage() {
       setIsLoading(true);
       setError("");
       try {
-        const params: Record<string, string> = {};
+        const params: Record<string, string> = {
+          limit: "51",
+          offset: String(offset),
+        };
         if (filters.walletId) params.walletId = filters.walletId;
         if (filters.categoryId) params.categoryId = filters.categoryId;
         if (filters.startDate) params.startDate = filters.startDate;
@@ -66,8 +77,15 @@ export default function TransactionsPage() {
           params.endDate = `${filters.endDate}T23:59:59.999Z`;
 
         const data = await transactionsApi.list(params);
-        if (!cancelled) setTransactions(data);
+        if (!cancelled) {
+          setTransactions(data.slice(0, 50));
+          setHasMore(data.length > 50);
+        }
       } catch (err: unknown) {
+        if (!cancelled) {
+          setTransactions([]);
+          setHasMore(false);
+        }
         if (!cancelled)
           setError(
             err instanceof ApiError
@@ -83,14 +101,16 @@ export default function TransactionsPage() {
     return () => {
       cancelled = true;
     };
-  }, [filters, queryReady]);
+  }, [filters, queryReady, offset, revision]);
 
   const handleDelete = async (id: string) => {
     if (!confirm("Are you sure you want to delete this transaction?")) return;
 
     try {
       await transactionsApi.delete(id);
-      setTransactions(transactions.filter((t) => t.id !== id));
+      if (transactions.length === 1 && offset > 0)
+        setOffset(Math.max(0, offset - 50));
+      else setRevision((value) => value + 1);
     } catch (error) {
       alert("Failed to delete transaction");
     }
@@ -182,13 +202,17 @@ export default function TransactionsPage() {
         </div>
       )}
 
+      <p className="text-xs text-gray-500">
+        Totals reflect the transactions shown on this page.
+      </p>
+
       {/* Filters */}
       <div className="bg-white rounded-lg shadow-sm p-4 border">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
           <select
             value={filters.walletId}
             onChange={(e) =>
-              setFilters({ ...filters, walletId: e.target.value })
+              changeFilters({ ...filters, walletId: e.target.value })
             }
             className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
@@ -203,7 +227,7 @@ export default function TransactionsPage() {
           <select
             value={filters.categoryId}
             onChange={(e) =>
-              setFilters({ ...filters, categoryId: e.target.value })
+              changeFilters({ ...filters, categoryId: e.target.value })
             }
             className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
@@ -219,7 +243,7 @@ export default function TransactionsPage() {
             type="date"
             value={filters.startDate}
             onChange={(e) =>
-              setFilters({ ...filters, startDate: e.target.value })
+              changeFilters({ ...filters, startDate: e.target.value })
             }
             className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="Start Date"
@@ -229,7 +253,7 @@ export default function TransactionsPage() {
             type="date"
             value={filters.endDate}
             onChange={(e) =>
-              setFilters({ ...filters, endDate: e.target.value })
+              changeFilters({ ...filters, endDate: e.target.value })
             }
             className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
             placeholder="End Date"
@@ -328,6 +352,29 @@ export default function TransactionsPage() {
             </table>
           </div>
         )}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-gray-600">
+        <span>
+          {transactions.length
+            ? `Showing ${offset + 1}?${offset + transactions.length}`
+            : "No entries"}
+        </span>
+        <div className="flex gap-3">
+          <button
+            disabled={isLoading || offset === 0}
+            onClick={() => setOffset(Math.max(0, offset - 50))}
+            className="rounded-lg border bg-white px-4 py-2"
+          >
+            Previous
+          </button>
+          <button
+            disabled={isLoading || !hasMore}
+            onClick={() => setOffset(offset + 50)}
+            className="rounded-lg border bg-white px-4 py-2"
+          >
+            Next
+          </button>
+        </div>
       </div>
     </div>
   );

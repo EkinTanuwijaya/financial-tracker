@@ -1,4 +1,9 @@
-import { Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from "@nestjs/common";
 import { PrismaService } from "../common/prisma/prisma.service";
 import { Prisma } from "@prisma/client";
 
@@ -18,9 +23,44 @@ type TransactionSource =
  */
 function signedAmount(
   categoryType: string | undefined,
-  amount: number,
-): number {
-  return categoryType === "INCOME" ? amount : -amount;
+  amount: Prisma.Decimal.Value,
+): Prisma.Decimal {
+  const value = new Prisma.Decimal(amount);
+  return categoryType === "INCOME" ? value : value.negated();
+}
+
+function validateInput(data: {
+  amount?: number;
+  currency?: string;
+  transactionDate?: Date;
+}) {
+  if (
+    data.amount !== undefined &&
+    (typeof data.amount !== "number" ||
+      !Number.isFinite(data.amount) ||
+      data.amount < 0.01 ||
+      data.amount > Number.MAX_SAFE_INTEGER)
+  )
+    throw new BadRequestException(
+      "Amount must be at least 0.01 and within the supported range",
+    );
+  if (data.currency !== undefined && data.currency !== "IDR")
+    throw new BadRequestException("Only IDR is supported");
+  if (
+    data.transactionDate !== undefined &&
+    (!(data.transactionDate instanceof Date) ||
+      !Number.isFinite(data.transactionDate.getTime()))
+  )
+    throw new BadRequestException("Invalid transaction date");
+}
+
+function validateRange(start?: Date, end?: Date) {
+  if (
+    (start && !Number.isFinite(start.getTime())) ||
+    (end && !Number.isFinite(end.getTime())) ||
+    (start && end && start > end)
+  )
+    throw new BadRequestException("Choose a valid date range");
 }
 
 @Injectable()
@@ -38,6 +78,7 @@ export class TransactionsService {
       offset?: number;
     },
   ) {
+    validateRange(options?.startDate, options?.endDate);
     const where: any = { userId };
 
     if (options?.walletId) where.walletId = options.walletId;
@@ -54,9 +95,9 @@ export class TransactionsService {
         wallet: true,
         category: true,
       },
-      orderBy: { transactionDate: "desc" },
-      take: options?.limit || 50,
-      skip: options?.offset || 0,
+      orderBy: [{ transactionDate: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+      take: options?.limit ?? 50,
+      skip: options?.offset ?? 0,
     });
   }
 
@@ -69,6 +110,7 @@ export class TransactionsService {
     userId: string,
     options?: { startDate?: Date; endDate?: Date },
   ) {
+    validateRange(options?.startDate, options?.endDate);
     const where: any = { userId };
 
     if (options?.startDate || options?.endDate) {
@@ -106,7 +148,7 @@ export class TransactionsService {
   }
 
   async findById(id: string, userId: string) {
-    return this.prisma.transaction.findFirst({
+    const transaction = await this.prisma.transaction.findFirst({
       where: { id, userId },
       include: {
         wallet: true,
@@ -114,6 +156,8 @@ export class TransactionsService {
         receipt: true,
       },
     });
+    if (!transaction) throw new NotFoundException("Transaction not found");
+    return transaction;
   }
 
   async create(
@@ -127,8 +171,37 @@ export class TransactionsService {
       transactionDate: Date;
       source?: string;
     },
+    receiptId?: string,
   ) {
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    validateInput(data);
+    return this.prisma.serializable(async (tx: Prisma.TransactionClient) => {
+      const wallet = await tx.wallet.findFirst({
+        where: { id: data.walletId, userId },
+      });
+      const category = await tx.category.findFirst({
+        where: { id: data.categoryId, userId },
+      });
+      if (!wallet || !category)
+        throw new NotFoundException("Wallet or category not found");
+      if (receiptId) {
+        const receipt = await tx.receipt.findFirst({
+          where: { id: receiptId, userId },
+        });
+        if (!receipt) throw new NotFoundException("Receipt not found");
+        if (receipt.transactionId)
+          throw new ConflictException("Receipt already has a transaction");
+      }
+
+      // A transaction has no sign of its own: `Transaction` stores a positive
+      // amount and the direction comes from its category. Income adds to the
+      // wallet, an expense takes from it. The balance update used to always
+      // increment, which inflated every wallet that recorded a spend.
+      await tx.wallet.update({
+        where: { id: data.walletId, userId },
+        data: {
+          balance: { increment: signedAmount(category.type, data.amount) },
+        },
+      });
       const transaction = await tx.transaction.create({
         data: {
           ...data,
@@ -137,30 +210,16 @@ export class TransactionsService {
           source:
             (data.source as TransactionSource) || TransactionSource.MANUAL,
         },
-        include: {
-          wallet: true,
-          category: true,
-        },
+        include: { wallet: true, category: true },
       });
-
-      // A transaction has no sign of its own: `Transaction` stores a positive
-      // amount and the direction comes from its category. Income adds to the
-      // wallet, an expense takes from it. The balance update used to always
-      // increment, which inflated every wallet that recorded a spend.
-      const category = await tx.category.findUnique({
-        where: { id: data.categoryId },
-        select: { type: true },
-      });
-
-      await tx.wallet.update({
-        where: { id: data.walletId },
-        data: {
-          balance: {
-            increment: signedAmount(category?.type, data.amount),
+      if (receiptId)
+        await tx.receipt.update({
+          where: { id: receiptId, userId },
+          data: {
+            transactionId: transaction.id,
+            processingStatus: "COMPLETED",
           },
-        },
-      });
-
+        });
       return transaction;
     });
   }
@@ -177,52 +236,56 @@ export class TransactionsService {
       transactionDate: Date;
     }>,
   ) {
-    const existing = await this.prisma.transaction.findFirst({
-      where: { id, userId },
-    });
-
-    if (!existing) return null;
-
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const oldCategory = await tx.category.findUnique({
-        where: { id: existing.categoryId },
+    validateInput(data);
+    return this.prisma.serializable(async (tx: Prisma.TransactionClient) => {
+      const existing = await tx.transaction.findFirst({
+        where: { id, userId },
+      });
+      if (!existing) throw new NotFoundException("Transaction not found");
+      const oldCategory = await tx.category.findFirst({
+        where: { id: existing.categoryId, userId },
         select: { type: true },
       });
       const newCategoryId = data.categoryId || existing.categoryId;
       const newCategory =
         newCategoryId === existing.categoryId
           ? oldCategory
-          : await tx.category.findUnique({
-              where: { id: newCategoryId },
+          : await tx.category.findFirst({
+              where: { id: newCategoryId, userId },
               select: { type: true },
             });
 
-      const oldAmount = Number(existing.amount);
+      const newWalletId = data.walletId || existing.walletId;
+      if (
+        !oldCategory ||
+        !newCategory ||
+        !(await tx.wallet.findFirst({ where: { id: newWalletId, userId } }))
+      )
+        throw new NotFoundException("Wallet or category not found");
+      const oldAmount = existing.amount;
       const newAmount = data.amount !== undefined ? data.amount : oldAmount;
 
       // Undo the old effect, then apply the new one. Doing both unconditionally
       // is correct even when nothing changed, since undo-then-apply nets out.
+      const reversal = signedAmount(oldCategory.type, oldAmount).negated();
+      if (newWalletId !== existing.walletId)
+        await tx.wallet.update({
+          where: { id: existing.walletId, userId },
+          data: { balance: { increment: reversal } },
+        });
       await tx.wallet.update({
-        where: { id: existing.walletId },
+        where: { id: newWalletId, userId },
         data: {
           balance: {
-            increment: -signedAmount(oldCategory?.type, oldAmount),
-          },
-        },
-      });
-
-      const newWalletId = data.walletId || existing.walletId;
-      await tx.wallet.update({
-        where: { id: newWalletId },
-        data: {
-          balance: {
-            increment: signedAmount(newCategory?.type, newAmount),
+            increment: signedAmount(newCategory.type, newAmount).plus(
+              newWalletId === existing.walletId ? reversal : 0,
+            ),
           },
         },
       });
 
       return tx.transaction.update({
-        where: { id },
+        where: { id, userId },
         data,
         include: {
           wallet: true,
@@ -233,36 +296,35 @@ export class TransactionsService {
   }
 
   async delete(id: string, userId: string) {
-    const existing = await this.prisma.transaction.findFirst({
-      where: { id, userId },
-    });
-
-    if (!existing) return null;
-
-    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const category = await tx.category.findUnique({
-        where: { id: existing.categoryId },
+    return this.prisma.serializable(async (tx: Prisma.TransactionClient) => {
+      const existing = await tx.transaction.findFirst({
+        where: { id, userId },
+      });
+      if (!existing) throw new NotFoundException("Transaction not found");
+      const category = await tx.category.findFirst({
+        where: { id: existing.categoryId, userId },
         select: { type: true },
       });
 
       // Undo the effect this transaction had, which means adding it back if it
       // was an expense and taking it back if it was income.
       await tx.wallet.update({
-        where: { id: existing.walletId },
+        where: { id: existing.walletId, userId },
         data: {
           balance: {
-            increment: -signedAmount(category?.type, Number(existing.amount)),
+            increment: signedAmount(category?.type, existing.amount).negated(),
           },
         },
       });
 
       return tx.transaction.delete({
-        where: { id },
+        where: { id, userId },
       });
     });
   }
 
   async getSummary(userId: string, startDate?: Date, endDate?: Date) {
+    validateRange(startDate, endDate);
     const where: any = { userId };
     if (startDate || endDate) {
       where.transactionDate = {};
@@ -270,23 +332,47 @@ export class TransactionsService {
       if (endDate) where.transactionDate.lte = endDate;
     }
 
-    const transactions = await this.prisma.transaction.findMany({
+    const grouped = await this.prisma.transaction.groupBy({
+      by: ["categoryId", "walletId"],
       where,
-      include: {
-        category: true,
-        wallet: true,
-      },
+      _sum: { amount: true },
     });
+    const [categories, wallets] = grouped.length
+      ? await Promise.all([
+          this.prisma.category.findMany({
+            where: { userId },
+            select: { id: true, name: true, type: true },
+          }),
+          this.prisma.wallet.findMany({
+            where: { userId },
+            select: { id: true, name: true },
+          }),
+        ])
+      : [[], []];
+    const categoryById = new Map(
+      categories.map((category) => [category.id, category]),
+    );
+    const walletById = new Map(wallets.map((wallet) => [wallet.id, wallet]));
 
     const summary = {
       totalIncome: 0,
       totalExpense: 0,
-      byCategory: {} as Record<string, { income: number; expense: number }>,
-      byWallet: {} as Record<string, { income: number; expense: number }>,
+      byCategory: Object.create(null) as Record<
+        string,
+        { income: number; expense: number }
+      >,
+      byWallet: Object.create(null) as Record<
+        string,
+        { income: number; expense: number }
+      >,
     };
 
-    for (const t of transactions) {
-      const amount = Number(t.amount);
+    for (const row of grouped) {
+      const category = categoryById.get(row.categoryId),
+        wallet = walletById.get(row.walletId);
+      if (!category || !wallet) continue;
+      const t = { category, wallet };
+      const amount = Number(row._sum.amount ?? 0);
       const isIncome = t.category.type === "INCOME";
 
       if (isIncome) {

@@ -11,6 +11,8 @@ import { UsersService } from "../users/users.service";
 import { WalletsService } from "../wallets/wallets.service";
 import { ReceiptsService } from "../receipts/receipts.service";
 import { AiService, TransactionExtraction } from "../ai/ai.service";
+import { TelegramLinkService } from "../users/telegram-link.service";
+import { jakartaDate } from "../common/calendar-date";
 import { generateReportPdf } from "../reports/report-pdf";
 import {
   REPORT_USAGE,
@@ -59,8 +61,20 @@ interface TelegramMessage {
   text?: string;
   chat: { id: number; type: string };
   from?: { id: number; username?: string; first_name?: string };
-  photo?: Array<{ file_id: string; file_unique_id: string; width: number; height: number; file_size?: number }>;
-  document?: { file_id: string; file_unique_id: string; file_name?: string; mime_type?: string; file_size?: number };
+  photo?: Array<{
+    file_id: string;
+    file_unique_id: string;
+    width: number;
+    height: number;
+    file_size?: number;
+  }>;
+  document?: {
+    file_id: string;
+    file_unique_id: string;
+    file_name?: string;
+    mime_type?: string;
+    file_size?: number;
+  };
   caption?: string;
 }
 
@@ -75,6 +89,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private readonly token: string;
   private stopped = false;
   private pollLoop: Promise<void> | null = null;
+  private readonly pollAbort = new AbortController();
+  private confirmationCleanup?: ReturnType<typeof setInterval>;
   private botInfo: {
     username: string | null;
     firstName: string | null;
@@ -88,6 +104,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     private readonly transactions: TransactionsService,
     private readonly receipts: ReceiptsService,
     private readonly ai: AiService,
+    private readonly telegramLinks: TelegramLinkService,
   ) {
     this.token = (this.config.get<string>("TELEGRAM_BOT_TOKEN") ?? "")
       .trim()
@@ -101,11 +118,20 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       );
       return;
     }
+    this.confirmationCleanup = setInterval(() => {
+      for (const [chatId, confirmation] of this.pendingConfirmations) {
+        if (confirmation.expiresAt <= Date.now())
+          this.pendingConfirmations.delete(chatId);
+      }
+    }, 60000);
+    this.confirmationCleanup.unref();
     this.pollLoop = this.run();
   }
 
   async onModuleDestroy(): Promise<void> {
     this.stopped = true;
+    this.pollAbort.abort();
+    clearInterval(this.confirmationCleanup);
     await this.pollLoop?.catch(() => undefined);
   }
 
@@ -119,6 +145,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         backoff = INITIAL_BACKOFF_MS;
 
         for (const update of updates) {
+          if (this.stopped) break;
           offset = update.update_id + 1;
           try {
             await this.handleUpdate(update);
@@ -129,6 +156,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           }
         }
       } catch (error) {
+        if (this.stopped) break;
         backoff = Math.min(backoff * 2, MAX_BACKOFF_MS);
         this.logger.warn(
           `Polling failed (${this.describe(error)}), retrying in ${backoff}ms`,
@@ -160,6 +188,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     // Handle pending confirmations first.
     const pending = this.pendingConfirmations.get(chatId);
     if (pending) {
+      if (pending.expiresAt <= Date.now()) {
+        this.pendingConfirmations.delete(chatId);
+        await this.sendMessage(
+          chatId,
+          "Confirmation expired. Please resend the transaction.",
+        );
+        return;
+      }
+      const currentUser = await this.findLinkedUser(message);
+      if (!currentUser || currentUser.id !== pending.userId) {
+        this.pendingConfirmations.delete(chatId);
+        return;
+      }
       const lower = text.toLowerCase();
       if (
         lower === "yes" ||
@@ -167,13 +208,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         lower === "y" ||
         lower === "ok"
       ) {
-        await this.transactions.create(pending.userId, {
-          walletId: pending.walletId,
-          categoryId: pending.categoryId,
-          amount: pending.amount,
-          description: pending.description,
-          transactionDate: pending.date,
-        });
+        await this.transactions.create(
+          pending.userId,
+          {
+            walletId: pending.walletId,
+            categoryId: pending.categoryId,
+            amount: pending.amount,
+            description: pending.description,
+            transactionDate: pending.date,
+            source: pending.receiptId ? "RECEIPT" : "TEXT",
+          },
+          pending.receiptId,
+        );
         this.pendingConfirmations.delete(chatId);
         await this.sendMessage(chatId, "Saved. ✅");
         return;
@@ -201,6 +247,15 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       case "/whoami":
         await this.sendWhoami(message);
         return;
+      case "/link": {
+        if (!message.from) return;
+        const code = await this.telegramLinks.issue(String(message.from.id));
+        await this.sendMessage(
+          chatId,
+          `Paste this pairing code in the dashboard Telegram settings:\n${code}\n\nExpires in 10 minutes. Do not share it with anyone else.`,
+        );
+        return;
+      }
       case "/wallets":
         await this.sendWallets(message);
         return;
@@ -224,13 +279,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       default:
         // Not a known command: classify first, then try AI extraction if it looks like a transaction
         if (this.ai.isAvailable()) {
+          if (!(await this.findLinkedUser(message))) return;
           const thinkingMsgId = await this.sendThinkingMessage(message.chat.id);
           let classification;
           try {
             classification = await this.ai.classifyMessage(message.text.trim());
           } catch (error) {
             this.logger.error("Classification failed:", error);
-            classification = { isTransaction: false, confidence: 0, reason: "Classification error" };
+            classification = {
+              isTransaction: false,
+              confidence: 0,
+              reason: "Classification error",
+            };
           }
 
           if (thinkingMsgId) {
@@ -286,8 +346,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           "",
           `Your Telegram ID: ${telegramId}`,
           "",
-          "Open the dashboard, paste that number into the Telegram banner,",
-          "and link it. Then send /wallets again.",
+          "Send /link to get a pairing code. Paste it into the dashboard Telegram settings,",
+          "then send /wallets again.",
         ].join("\n"),
       );
       return null;
@@ -628,15 +688,23 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   private async handleReceipt(message: TelegramMessage): Promise<void> {
     const user = await this.findLinkedUser(message);
     if (!user) {
-      await this.sendMessage(message.chat.id, "Please link your account first using /start");
+      await this.sendMessage(
+        message.chat.id,
+        "Please link your account first using /start",
+      );
       return;
     }
 
     this.pendingConfirmations.delete(message.chat.id);
 
-    const fileId = message.photo?.[message.photo.length - 1]?.file_id ?? message.document?.file_id;
+    const fileId =
+      message.photo?.[message.photo.length - 1]?.file_id ??
+      message.document?.file_id;
     if (!fileId) {
-      await this.sendMessage(message.chat.id, "Could not get file from message.");
+      await this.sendMessage(
+        message.chat.id,
+        "Could not get file from message.",
+      );
       return;
     }
 
@@ -647,7 +715,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     try {
       const file = await this.getFile(fileId);
       if (!file) {
-        await this.sendMessage(message.chat.id, "Failed to get file info from Telegram.");
+        await this.sendMessage(
+          message.chat.id,
+          "Failed to get file info from Telegram.",
+        );
         return;
       }
 
@@ -655,14 +726,23 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
       const imageBuffer = await this.downloadFile(file);
       if (!imageBuffer) {
-        await this.sendMessage(message.chat.id, "Failed to download file content.");
+        await this.sendMessage(
+          message.chat.id,
+          "Failed to download file content.",
+        );
         return;
       }
 
       this.logger.log(`Downloaded ${imageBuffer.length} bytes`);
 
-      const receipt = await this.receipts.create(user.id, { fileUrl: `telegram:${fileId}` });
-      await this.receipts.processReceipt(receipt.id, imageBuffer, message.caption);
+      const receipt = await this.receipts.create(user.id, {
+        fileUrl: `telegram:${fileId}`,
+      });
+      await this.receipts.processReceipt(
+        receipt.id,
+        imageBuffer,
+        message.caption,
+      );
 
       const processed = await this.receipts.findById(receipt.id, user.id);
 
@@ -677,7 +757,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
         }
       }
 
-      if (processed?.processingStatus === "WAITING_CONFIRMATION" && processed.extractedData) {
+      if (
+        processed?.processingStatus === "WAITING_CONFIRMATION" &&
+        processed.extractedData
+      ) {
         const extraction = processed.extractedData as {
           type: string;
           amount: number;
@@ -686,17 +769,19 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           description?: string;
           date?: string;
         };
-        const isIncome = extraction.type === "INCOME";
-        const sign = isIncome ? "+" : "-";
 
         const [wallet, category] = await Promise.all([
-          extraction.wallet?.trim() ? this.wallets.findByName(user.id, extraction.wallet) : null,
-          extraction.category?.trim() ? this.categories.findByName(user.id, extraction.category) : null,
+          extraction.wallet?.trim()
+            ? this.wallets.findByName(user.id, extraction.wallet)
+            : null,
+          extraction.category?.trim()
+            ? this.categories.findByName(user.id, extraction.category)
+            : null,
         ]);
         if (!wallet || !category) {
           await this.sendMessage(
             message.chat.id,
-            `Receipt amount: ${sign}Rp ${extraction.amount.toLocaleString("id-ID")}\n` +
+            `Receipt amount: Rp ${extraction.amount.toLocaleString("id-ID")}\n` +
               `Date: ${extraction.date ?? "(not detected)"}\n\n` +
               `Cannot save yet: ${[!wallet && "wallet not matched", !category && "category not matched"].filter(Boolean).join(", ")}.\n` +
               `Check /wallets and /category. Create missing entries with /wallet add <name> and /category add <name>.\n` +
@@ -709,7 +794,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           message.chat.id,
           `Receipt processed! 📄\n\n` +
             `Please confirm:\n` +
-            `${sign}Rp ${extraction.amount.toLocaleString("id-ID")} — ${extraction.category} (${extraction.wallet})` +
+            `${category.type === "INCOME" ? "+" : "-"}Rp ${extraction.amount.toLocaleString("id-ID")} — ${extraction.category} (${extraction.wallet})` +
             (extraction.description ? `\n${extraction.description}` : "") +
             `\nDate: ${extraction.date ?? "(not detected — will use today)"}\n` +
             `Reply "yes" to save, anything else to cancel.`,
@@ -721,12 +806,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           categoryId: category.id,
           amount: extraction.amount,
           description: extraction.description ?? "",
-          date: extraction.date ? new Date(extraction.date) : new Date(),
+          date: extraction.date
+            ? this.parseRelativeDate(extraction.date)
+            : this.parseRelativeDate("today"),
           receiptId: receipt.id,
+          expiresAt: Date.now() + 10 * 60 * 1000,
         });
       } else {
-        const rawText = processed?.rawText ? `\n\nOCR text: ${processed.rawText.slice(0, 300)}` : "";
-        const extracted = processed?.extractedData as { error?: string } | undefined;
+        const rawText = processed?.rawText
+          ? `\n\nOCR text: ${processed.rawText.slice(0, 300)}`
+          : "";
+        const extracted = processed?.extractedData as
+          { error?: string } | undefined;
         const errorInfo = extracted?.error ? `\nError: ${extracted.error}` : "";
         await this.sendMessage(
           message.chat.id,
@@ -745,7 +836,10 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           // Ignore
         }
       }
-      await this.sendMessage(message.chat.id, "Failed to process receipt. Please try again.");
+      await this.sendMessage(
+        message.chat.id,
+        "Failed to process receipt. Please try again.",
+      );
     }
   }
 
@@ -774,24 +868,30 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       this.logger.error(`getFile failed: ${JSON.stringify(data)}`);
       return null;
     } catch (error) {
-      this.logger.error(`getFile error: ${error}`);
+      this.logger.error(`getFile error: ${this.describe(error)}`);
       return null;
     }
   }
 
-  private async downloadFile(file: { file_path: string }): Promise<Buffer | null> {
+  private async downloadFile(file: {
+    file_path: string;
+  }): Promise<Buffer | null> {
     try {
       const url = `${TELEGRAM_API}/file/bot${this.token}/${file.file_path}`;
-      this.logger.debug(`Downloading file from: ${url}`);
-      const response = await fetch(url);
+      this.logger.debug(`Downloading Telegram file: ${file.file_path}`);
+      const response = await fetch(url, {
+        signal: AbortSignal.timeout(30_000),
+      });
       if (!response.ok) {
-        this.logger.error(`Download failed: ${response.status} ${response.statusText} for ${url}`);
+        this.logger.error(
+          `Download failed: ${response.status} ${response.statusText}`,
+        );
         return null;
       }
       const arrayBuffer = await response.arrayBuffer();
       return Buffer.from(arrayBuffer);
     } catch (error) {
-      this.logger.error(`downloadFile error: ${error}`);
+      this.logger.error(`downloadFile error: ${this.describe(error)}`);
       return null;
     }
   }
@@ -866,13 +966,12 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     const c = category!;
 
     // Determine the category type to set the sign correctly.
-    const catType =
-      extraction.type ?? (c.type === "INCOME" ? "INCOME" : "EXPENSE");
+    const catType = c.type === "INCOME" ? "INCOME" : "EXPENSE";
 
     // Parse date or default to today.
     const date = extraction.date
       ? this.parseRelativeDate(extraction.date)
-      : new Date();
+      : this.parseRelativeDate("today");
 
     const isIncome = catType === "INCOME";
     const sign = isIncome ? "+" : "-";
@@ -895,6 +994,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       amount: extraction.amount,
       description: extraction.description ?? undefined,
       date,
+      expiresAt: Date.now() + 10 * 60 * 1000,
     });
   }
 
@@ -908,6 +1008,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       description?: string;
       date: Date;
       receiptId?: string;
+      expiresAt: number;
     }
   >();
 
@@ -920,6 +1021,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     candidates: T[],
   ): T | null {
     const lower = input.toLowerCase().trim();
+    if (!lower) return null;
     const exact = candidates.find((c) => c.name.toLowerCase() === lower);
     if (exact) return exact;
 
@@ -938,10 +1040,7 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
    */
   private parseRelativeDate(input: string): Date {
     const lower = input.toLowerCase().trim();
-    const now = new Date();
-    const today = new Date(
-      Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()),
-    );
+    const today = new Date(`${jakartaDate()}T00:00:00.000Z`);
 
     if (lower === "today" || lower === "hari ini") return today;
     if (lower === "yesterday" || lower === "kemarin") {
@@ -951,12 +1050,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     // Try ISO
     const iso = lower.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (iso) {
-      return new Date(
+      const date = new Date(
         Date.UTC(Number(iso[1]), Number(iso[2]) - 1, Number(iso[3])),
       );
+      if (date.toISOString().slice(0, 10) === lower) return date;
     }
-
-    return today;
+    throw new Error(
+      "Invalid transaction date. Use YYYY-MM-DD, today, or yesterday.",
+    );
   }
 
   private async sendMessage(chatId: number, text: string): Promise<void> {
@@ -1003,7 +1104,16 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async sendChatAction(chatId: number, action: "typing" | "record_audio" | "upload_photo" | "upload_video" | "upload_document" | "find_location"): Promise<void> {
+  private async sendChatAction(
+    chatId: number,
+    action:
+      | "typing"
+      | "record_audio"
+      | "upload_photo"
+      | "upload_video"
+      | "upload_document"
+      | "find_location",
+  ): Promise<void> {
     await this.call("sendChatAction", {
       chat_id: chatId,
       action,
@@ -1012,18 +1122,22 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
 
   private async sendThinkingMessage(chatId: number): Promise<number | null> {
     try {
-      const result = await this.call<{ ok: boolean; result: { message_id: number } }>("sendMessage", {
+      const result = await this.call<{ message_id: number }>("sendMessage", {
         chat_id: chatId,
         text: "🤔 Thinking...",
         disable_web_page_preview: true,
       });
-      return result.result?.message_id ?? null;
+      return result.message_id ?? null;
     } catch {
       return null;
     }
   }
 
-  private async editMessage(chatId: number, messageId: number, text: string): Promise<void> {
+  private async editMessage(
+    chatId: number,
+    messageId: number,
+    text: string,
+  ): Promise<void> {
     await this.call("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
@@ -1040,6 +1154,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
+      signal:
+        method === "getUpdates"
+          ? AbortSignal.any([
+              this.pollAbort.signal,
+              AbortSignal.timeout(35_000),
+            ])
+          : AbortSignal.timeout(30_000),
     });
 
     const data = (await response.json()) as {

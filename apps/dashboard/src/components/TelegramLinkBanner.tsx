@@ -89,7 +89,7 @@ export default function TelegramLinkBanner() {
       <div>
         <div>
           <p className="telegram-link-help">
-            Send <code>/wallets</code> to{" "}
+            Send <code>/link</code> to{" "}
             {botUsername ? (
               <>
                 <code>@{botUsername}</code>.
@@ -97,24 +97,23 @@ export default function TelegramLinkBanner() {
             ) : (
               <>the Finance Tracker bot in Telegram.</>
             )}{" "}
-            Enter the returned Telegram ID below.
+            Paste its pairing code below. Codes expire after 10 minutes.
           </p>
         </div>
 
         <form onSubmit={handleLink}>
           <label htmlFor="telegramId" className="sr-only">
-            Telegram ID
+            Telegram pairing code
           </label>
           <input
             id="telegramId"
             type="text"
-            inputMode="numeric"
             value={value}
             onChange={(e) => {
               setValue(e.target.value);
               setError("");
             }}
-            placeholder="123456789"
+            placeholder="Pairing code from /link"
             className="telegram-id-input"
           />
           <button
