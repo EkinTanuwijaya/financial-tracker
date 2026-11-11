@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { categoriesApi, transactionsApi } from "@/lib/api";
+import Modal from "@/components/Modal";
+import FinanceIcon from "@/components/FinanceIcon";
 import {
   formatCurrency,
   formatPercent,
@@ -128,9 +130,10 @@ export default function CategoriesPage() {
   ).length;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex justify-between items-start">
+    <div className="management-page space-y-6">
+      <div className="overview-heading">
         <div>
+          <p className="eyebrow">ORGANIZATION</p>
           <h1 className="text-2xl font-bold text-gray-900">Categories</h1>
           <p className="text-gray-500">
             {categories.length === 0
@@ -138,74 +141,21 @@ export default function CategoriesPage() {
               : `${categories.length} total · ${expenseCount} expense, ${incomeCount} income`}
           </p>
         </div>
-        <div className="flex items-center gap-3 whitespace-nowrap">
-          <button
-            onClick={handleSeed}
-            className="text-sm text-gray-500 hover:text-gray-700 font-medium"
-          >
-            Seed defaults
+        <div className="management-actions">
+          <button onClick={handleSeed} className="secondary-action">
+            Use default categories
           </button>
           <button
             onClick={() => {
               resetForm();
               setShowForm(true);
             }}
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+            className="primary-action"
           >
-            + Add category
+            <FinanceIcon name="plus" /> Add category
           </button>
         </div>
       </div>
-
-      {/* Usage insight */}
-      {categories.length > 0 && (
-        <div className="bg-white rounded-lg shadow-sm border p-6">
-          <h2 className="text-lg font-semibold text-gray-900">
-            This month in categories
-          </h2>
-          {spend.length === 0 ? (
-            <p className="mt-2 text-sm text-gray-500">
-              No spending recorded yet.{" "}
-              {unusedCount > 0
-                ? `${unusedCount} expense ${unusedCount === 1 ? "category is" : "categories are"} available but unused.`
-                : "All categories have been used."}
-            </p>
-          ) : (
-            <>
-              <p className="mt-2 text-sm text-gray-600">
-                {formatCurrency(totalTracked)} tracked across {spend.length}{" "}
-                {spend.length === 1 ? "category" : "categories"}
-                {unusedCount > 0 && `, with ${unusedCount} unused`}. The
-                heaviest is{" "}
-                <span className="font-semibold text-gray-900">
-                  {spend[0].name}
-                </span>{" "}
-                at {formatPercent(spend[0].percent, 0)}.
-              </p>
-              <div className="mt-4 space-y-3">
-                {spend.map((s) => (
-                  <div key={s.name}>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-700 font-medium">
-                        {s.name}
-                      </span>
-                      <span className="text-gray-500">
-                        {formatCurrency(s.amount)}
-                      </span>
-                    </div>
-                    <div className="mt-1.5 h-2 rounded-full bg-gray-100 overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-blue-500"
-                        style={{ width: `${s.percent}%` }}
-                      />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
-      )}
 
       {!showForm && error && (
         <p
@@ -216,18 +166,92 @@ export default function CategoriesPage() {
         </p>
       )}
 
-      {showForm && (
-        <div className="bg-white rounded-lg shadow-sm p-6 border space-y-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-gray-900">
-              {editingCategory ? "Edit Category" : "New Category"}
-            </h2>
-            <button
-              onClick={resetForm}
-              className="text-gray-400 hover:text-gray-600"
+      <div className="management-columns">
+        <div className="management-primary">
+          {showForm && (
+            <Modal
+              icon="categories"
+              title={editingCategory ? "Edit category" : "Add category"}
+              onClose={resetForm}
+              busy={submitting}
+              closeLabel="Close category form"
             >
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                  <div
+                    role="alert"
+                    className="bg-red-50 text-red-600 p-4 rounded-lg text-sm"
+                  >
+                    {error}
+                  </div>
+                )}
+
+                <div>
+                  <label
+                    htmlFor="name"
+                    className="block text-sm font-medium text-gray-700 mb-1"
+                  >
+                    Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    id="name"
+                    type="text"
+                    value={formData.name}
+                    onChange={(e) => handleChange("name", e.target.value)}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder="e.g., Food, Transport, Shopping"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="type"
+                    className="block text-sm font-medium text-gray-700 mb-1"
+                  >
+                    Type <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    id="type"
+                    value={formData.type}
+                    onChange={(e) => handleChange("type", e.target.value)}
+                    required
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="EXPENSE">Expense</option>
+                    <option value="INCOME">Income</option>
+                  </select>
+                </div>
+
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={resetForm}
+                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {submitting
+                      ? "Saving..."
+                      : editingCategory
+                        ? "Update"
+                        : "Create"}
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          )}
+
+          {categories.length === 0 ? (
+            <div className="management-empty bg-white rounded-lg shadow-sm p-12 border text-center">
               <svg
-                className="w-5 h-5"
+                className="mx-auto h-12 w-12 text-gray-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -236,173 +260,168 @@ export default function CategoriesPage() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
+                  d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7c0-.512.195-1.024.586-1.414L12 1"
                 />
               </svg>
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm">
-                {error}
-              </div>
-            )}
-
-            <div>
-              <label
-                htmlFor="name"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
-                Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                id="name"
-                type="text"
-                value={formData.name}
-                onChange={(e) => handleChange("name", e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g., Food, Transport, Shopping"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="type"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
-                Type <span className="text-red-500">*</span>
-              </label>
-              <select
-                id="type"
-                value={formData.type}
-                onChange={(e) => handleChange("type", e.target.value)}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="EXPENSE">Expense</option>
-                <option value="INCOME">Income</option>
-              </select>
-            </div>
-
-            <div className="flex justify-end space-x-3 pt-4 border-t">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {submitting
-                  ? "Saving..."
-                  : editingCategory
-                    ? "Update"
-                    : "Create"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {categories.length === 0 ? (
-        <div className="bg-white rounded-lg shadow-sm p-12 border text-center">
-          <svg
-            className="mx-auto h-12 w-12 text-gray-400"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7c0-.512.195-1.024.586-1.414L12 1"
-            />
-          </svg>
-          <h3 className="mt-2 text-sm font-medium text-gray-900">
-            No categories
-          </h3>
-          <p className="mt-1 text-sm text-gray-500">
-            Create categories to organize your transactions.
-          </p>
-          <div className="mt-4 flex justify-center space-x-3">
-            <button
-              onClick={handleSeed}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium"
-            >
-              Seed Default Categories
-            </button>
-            <button
-              onClick={() => {
-                resetForm();
-                setShowForm(true);
-              }}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
-            >
-              Create Category
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="bg-white rounded-lg shadow-sm border divide-y">
-          {categories.map((category) => (
-            <div
-              key={category.id}
-              className="p-4 flex items-center justify-between hover:bg-gray-50"
-            >
-              <div className="flex items-center space-x-4">
-                <div
-                  className={`w-10 h-10 rounded-full flex items-center justify-center ${category.type === "INCOME" ? "bg-green-100" : "bg-red-100"}`}
+              <h3 className="mt-2 text-sm font-medium text-gray-900">
+                No categories
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Create categories to organize your transactions.
+              </p>
+              <div className="mt-4 flex justify-center space-x-3">
+                <button
+                  onClick={handleSeed}
+                  className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 text-sm font-medium"
                 >
-                  <svg
-                    className={`w-5 h-5 ${category.type === "INCOME" ? "text-green-600" : "text-red-600"}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d={
-                        category.type === "INCOME"
-                          ? "M12 6v18M18 12H6"
-                          : "M20 12H4M12 4v16"
-                      }
-                    />
-                  </svg>
-                </div>
+                  Use default categories
+                </button>
+                <button
+                  onClick={() => {
+                    resetForm();
+                    setShowForm(true);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium"
+                >
+                  Create Category
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="category-list bg-white rounded-lg shadow-sm border divide-y">
+              <div className="management-section-heading table-heading">
                 <div>
-                  <h3 className="font-semibold text-gray-900">
-                    {category.name}
-                  </h3>
-                  <p className="text-sm text-gray-500">{category.type}</p>
+                  <h2>Your categories</h2>
+                  <p>Give every transaction a place.</p>
                 </div>
+                <span className="count-badge">
+                  {categories.length} categories
+                </span>
               </div>
-              <div className="flex items-center space-x-4">
-                <button
-                  onClick={() => handleEdit(category)}
-                  className="text-blue-600 hover:text-blue-900 text-sm font-medium"
+              {["EXPENSE", "INCOME"].map((type) => (
+                <section
+                  key={type}
+                  className="category-group"
+                  aria-label={`${type === "INCOME" ? "Income" : "Expense"} categories`}
                 >
-                  Edit
-                </button>
-                <button
-                  onClick={() => handleDelete(category.id)}
-                  className="text-red-600 hover:text-red-900 text-sm font-medium"
-                >
-                  Delete
-                </button>
-              </div>
+                  <div className="category-group-heading">
+                    <span>{type === "INCOME" ? "Income" : "Expenses"}</span>
+                    <span>
+                      {type === "INCOME" ? incomeCount : expenseCount}
+                    </span>
+                  </div>
+                  {categories
+                    .filter((category) => category.type === type)
+                    .map((category) => (
+                      <div
+                        key={category.id}
+                        className="category-row p-4 flex items-center justify-between hover:bg-gray-50"
+                      >
+                        <div className="flex items-center space-x-4">
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center ${category.type === "INCOME" ? "bg-green-100" : "bg-red-100"}`}
+                          >
+                            <FinanceIcon
+                              name={category.type === "INCOME" ? "up" : "down"}
+                              className={
+                                category.type === "INCOME"
+                                  ? "income-text"
+                                  : "expense-text"
+                              }
+                            />
+                          </div>
+                          <div>
+                            <h3 className="font-semibold text-gray-900">
+                              {category.name}
+                            </h3>
+                            <p className="text-sm text-gray-500">
+                              {category.type === "INCOME"
+                                ? "Income"
+                                : "Expense"}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-4">
+                          <button
+                            onClick={() => handleEdit(category)}
+                            aria-label={`Edit ${category.name}`}
+                            className="text-blue-600 hover:text-blue-900 text-sm font-medium"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(category.id)}
+                            aria-label={`Delete ${category.name}`}
+                            className="text-red-600 hover:text-red-900 text-sm font-medium"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  {!categories.some((category) => category.type === type) && (
+                    <p className="category-group-empty">
+                      No {type.toLowerCase()} categories yet.
+                    </p>
+                  )}
+                </section>
+              ))}
             </div>
-          ))}
+          )}
         </div>
-      )}
+        <aside className="management-aside" aria-label="Category spending">
+          {/* Usage insight */}
+          {categories.length > 0 && (
+            <div className="category-insight bg-white rounded-lg shadow-sm border p-6">
+              <p className="eyebrow">THIS MONTH</p>
+              <h2 className="text-lg font-semibold text-gray-900">
+                Spending breakdown
+              </h2>
+              {spend.length === 0 ? (
+                <p className="mt-2 text-sm text-gray-500">
+                  No spending recorded yet.{" "}
+                  {unusedCount > 0
+                    ? `${unusedCount} expense ${unusedCount === 1 ? "category is" : "categories are"} available but unused.`
+                    : "All categories have been used."}
+                </p>
+              ) : (
+                <>
+                  <p className="mt-2 text-sm text-gray-600">
+                    {formatCurrency(totalTracked)} tracked across {spend.length}{" "}
+                    {spend.length === 1 ? "category" : "categories"}
+                    {unusedCount > 0 && `, with ${unusedCount} unused`}. The
+                    heaviest is{" "}
+                    <span className="font-semibold text-gray-900">
+                      {spend[0].name}
+                    </span>{" "}
+                    at {formatPercent(spend[0].percent, 0)}.
+                  </p>
+                  <div className="mt-4 space-y-3">
+                    {spend.map((s) => (
+                      <div key={s.name}>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-gray-700 font-medium">
+                            {s.name}
+                          </span>
+                          <span className="text-gray-500">
+                            {formatCurrency(s.amount)}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 h-2 rounded-full bg-gray-100 overflow-hidden">
+                          <div
+                            className="h-full rounded-full bg-blue-500"
+                            style={{ width: `${s.percent}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }

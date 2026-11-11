@@ -3,13 +3,19 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Modal from "@/components/Modal";
+import FinanceIcon from "@/components/FinanceIcon";
 import { transactionsApi, walletsApi, categoriesApi } from "@/lib/api";
 import { dateInputValue } from "@/lib/utils";
 
 export default function TransactionForm({
   transactionId,
+  onSaved,
+  onCancel,
 }: {
   transactionId?: string;
+  onSaved?: () => void;
+  onCancel?: () => void;
 }) {
   const router = useRouter();
   const [wallets, setWallets] = useState<any[]>([]);
@@ -107,8 +113,11 @@ export default function TransactionForm({
       };
       if (transactionId) await transactionsApi.update(transactionId, data);
       else await transactionsApi.create(data);
-      router.push("/dashboard/transactions");
-      router.refresh();
+      if (onSaved) onSaved();
+      else {
+        router.push("/dashboard/transactions");
+        router.refresh();
+      }
     } catch (err: any) {
       setError(err.message || "Failed to create transaction");
     } finally {
@@ -116,45 +125,33 @@ export default function TransactionForm({
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {transactionId ? "Edit Transaction" : "New Transaction"}
-          </h1>
-          <p className="text-gray-500">
-            {transactionId
-              ? "Update this transaction"
-              : "Record a new transaction"}
-          </p>
-        </div>
-        <Link
-          href="/dashboard/transactions"
-          className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium"
+  const form = isLoading ? (
+    <div
+      className="flex items-center justify-center h-64"
+      role="status"
+      aria-label="Loading transaction form"
+    >
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600" />
+    </div>
+  ) : (
+    <form
+      onSubmit={handleSubmit}
+      className={
+        onCancel
+          ? "space-y-6"
+          : "management-form bg-white rounded-lg shadow-sm p-6 border space-y-6"
+      }
+    >
+      {error && (
+        <div
+          role="alert"
+          className="bg-red-50 text-red-600 p-4 rounded-lg text-sm"
         >
-          Back to List
-        </Link>
-      </div>
+          {error}
+        </div>
+      )}
 
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white rounded-lg shadow-sm p-6 border space-y-6"
-      >
-        {error && (
-          <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm">
-            {error}
-          </div>
-        )}
-
+      <div className="transaction-form-grid">
         <div>
           <label
             htmlFor="walletId"
@@ -199,7 +196,7 @@ export default function TransactionForm({
           </select>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="form-wide grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <label
               htmlFor="amount"
@@ -254,7 +251,7 @@ export default function TransactionForm({
           />
         </div>
 
-        <div>
+        <div className="form-wide">
           <label
             htmlFor="description"
             className="block text-sm font-medium text-gray-700 mb-1"
@@ -270,27 +267,72 @@ export default function TransactionForm({
             placeholder="Optional description"
           />
         </div>
-
-        <div className="flex justify-end space-x-3 pt-4 border-t">
+      </div>
+      <div className="flex justify-end space-x-3 pt-4 border-t">
+        {onCancel ? (
+          <button
+            type="button"
+            className="secondary-action"
+            disabled={submitting}
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+        ) : (
           <Link
             href="/dashboard/transactions"
             className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium"
           >
             Cancel
           </Link>
-          <button
-            type="submit"
-            disabled={submitting || !formData.walletId || !formData.categoryId}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {submitting
-              ? "Saving..."
-              : transactionId
-                ? "Update Transaction"
-                : "Create Transaction"}
-          </button>
+        )}
+        <button
+          type="submit"
+          disabled={submitting || !formData.walletId || !formData.categoryId}
+          className="primary-action"
+        >
+          <FinanceIcon name="plus" />
+          {submitting
+            ? "Saving..."
+            : transactionId
+              ? "Update Transaction"
+              : "Create Transaction"}
+        </button>
+      </div>
+    </form>
+  );
+
+  if (onCancel)
+    return (
+      <Modal
+        icon="transactions"
+        title={transactionId ? "Edit transaction" : "Add transaction"}
+        onClose={onCancel}
+        busy={submitting}
+      >
+        {form}
+      </Modal>
+    );
+
+  return (
+    <div className="management-page transaction-editor max-w-2xl mx-auto space-y-6">
+      <div className="overview-heading">
+        <div>
+          <p className="eyebrow">TRANSACTIONS</p>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {transactionId ? "Edit Transaction" : "New Transaction"}
+          </h1>
+          <p className="text-gray-500">
+            {transactionId
+              ? "Update this transaction"
+              : "Record a new transaction"}
+          </p>
         </div>
-      </form>
+        <Link href="/dashboard/transactions" className="secondary-action">
+          Back to List
+        </Link>
+      </div>
+      {form}
     </div>
   );
 }

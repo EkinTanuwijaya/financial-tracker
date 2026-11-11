@@ -17,6 +17,7 @@ import {
 } from "@/lib/overview";
 import FinanceIcon from "@/components/FinanceIcon";
 import MonthPicker from "@/components/MonthPicker";
+import TransactionForm from "@/components/TransactionForm";
 
 type Wallet = {
   id: string;
@@ -42,6 +43,7 @@ const SPENDING_COLORS = [
 ];
 
 export default function DashboardPage() {
+  const [showTransactionForm, setShowTransactionForm] = useState(false);
   const [month, setMonth] = useState(currentMonth);
   const [allTime, setAllTime] = useState(false);
   const [revision, setRevision] = useState(0);
@@ -148,10 +150,13 @@ export default function DashboardPage() {
           </h1>
           <p>Your money, with a little more perspective.</p>
         </div>
-        <Link href="/dashboard/transactions/new" className="primary-action">
+        <button
+          onClick={() => setShowTransactionForm(true)}
+          className="primary-action"
+        >
           <FinanceIcon name="plus" />
           Add transaction
-        </Link>
+        </button>
       </div>
 
       <div className="period-toolbar">
@@ -560,6 +565,15 @@ export default function DashboardPage() {
             </div>
           </>
         )
+      )}
+      {showTransactionForm && (
+        <TransactionForm
+          onCancel={() => setShowTransactionForm(false)}
+          onSaved={() => {
+            setShowTransactionForm(false);
+            setRevision((value) => value + 1);
+          }}
+        />
       )}
     </div>
   );
