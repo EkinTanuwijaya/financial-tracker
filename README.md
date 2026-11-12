@@ -127,13 +127,7 @@ Send `/link` to the bot in a private chat, then paste its one-time pairing code 
 
 ## Deployment
 
-```bash
-# Build production images
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml build
-
-# Deploy
-docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-```
+See [VPS deployment and CI/CD](docs/deployment.md) for Ubuntu/Docker setup, GitHub Actions secrets, IP-only HTTPS, backups, and rollback. Production uses `docker-compose.prod.yml` by itself; do not merge it with the development file.
 
 ## Learning Goals
 
