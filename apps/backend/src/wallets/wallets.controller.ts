@@ -1,3 +1,5 @@
+import { NotFoundException } from "@nestjs/common";
+import { CreateWalletDto, UpdateWalletDto } from "../common/request.dto";
 import {
   Controller,
   Get,
@@ -6,13 +8,16 @@ import {
   Patch,
   Param,
   Delete,
-  Query,
+  UseGuards,
+  Request,
 } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
 import { WalletsService } from "./wallets.service";
+import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 
 @ApiTags("wallets")
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller("wallets")
 export class WalletsController {
   constructor(private readonly walletsService: WalletsService) {}
@@ -21,43 +26,40 @@ export class WalletsController {
   @ApiOperation({ summary: "Create a new wallet" })
   async create(
     @Body()
-    body: { name: string; type: string; currency?: string; balance?: number },
-    @Query("userId") userId: string,
+    body: CreateWalletDto,
+    @Request() req: any,
   ) {
-    return this.walletsService.create(userId, body);
+    return this.walletsService.create(req.user.id, body);
   }
 
   @Get()
   @ApiOperation({ summary: "Get all wallets for user" })
-  async findAll(@Query("userId") userId: string) {
-    return this.walletsService.findAll(userId);
+  async findAll(@Request() req: any) {
+    return this.walletsService.findAll(req.user.id);
   }
 
   @Get(":id")
   @ApiOperation({ summary: "Get wallet by ID" })
-  async findById(@Param("id") id: string, @Query("userId") userId: string) {
-    return this.walletsService.findById(id, userId);
+  async findById(@Param("id") id: string, @Request() req: any) {
+    const wallet = await this.walletsService.findById(id, req.user.id);
+    if (!wallet) throw new NotFoundException("Wallet not found");
+    return wallet;
   }
 
   @Patch(":id")
   @ApiOperation({ summary: "Update wallet" })
   async update(
     @Param("id") id: string,
-    @Query("userId") userId: string,
+    @Request() req: any,
     @Body()
-    body: Partial<{
-      name: string;
-      type: string;
-      currency: string;
-      balance: number;
-    }>,
+    body: UpdateWalletDto,
   ) {
-    return this.walletsService.update(id, userId, body);
+    return this.walletsService.update(id, req.user.id, body);
   }
 
   @Delete(":id")
   @ApiOperation({ summary: "Delete wallet" })
-  async delete(@Param("id") id: string, @Query("userId") userId: string) {
-    return this.walletsService.delete(id, userId);
+  async delete(@Param("id") id: string, @Request() req: any) {
+    return this.walletsService.delete(id, req.user.id);
   }
 }

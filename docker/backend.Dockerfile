@@ -1,9 +1,9 @@
 # Development Dockerfile for NestJS Backend
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 
-# Prisma needs OpenSSL on Alpine
+# Prisma needs OpenSSL on Alpine. PaddleOCR runs in its own Python service.
 RUN apk add --no-cache openssl libc6-compat
 
 # Install pnpm (corepack ships the correct binary for this platform)
@@ -23,7 +23,7 @@ RUN pnpm install --frozen-lockfile
 COPY . .
 
 # Generate Prisma client
-RUN pnpm --filter @finance-tracker/backend run db:generate -- --schema=../../packages/prisma/schema.prisma
+RUN pnpm --filter @finance-tracker/backend exec prisma generate --schema=../../packages/prisma/schema.prisma
 
 EXPOSE 3001
 

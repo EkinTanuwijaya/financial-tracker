@@ -12,6 +12,12 @@ export class WalletsService {
     });
   }
 
+  async findByName(userId: string, name: string) {
+    return this.prisma.wallet.findFirst({
+      where: { userId, name: { equals: name, mode: "insensitive" } },
+    });
+  }
+
   async findById(id: string, userId: string) {
     return this.prisma.wallet.findFirst({
       where: { id, userId },

@@ -1,4 +1,9 @@
 import {
+  CreateTransactionDto,
+  UpdateTransactionDto,
+  TransactionQueryDto,
+} from "../common/request.dto";
+import {
   Controller,
   Get,
   Post,
@@ -7,12 +12,16 @@ import {
   Param,
   Delete,
   Query,
+  UseGuards,
+  Request,
 } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiBearerAuth } from "@nestjs/swagger";
 import { TransactionsService } from "./transactions.service";
+import { JwtAuthGuard } from "../auth/guards/jwt-auth.guard";
 
 @ApiTags("transactions")
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller("transactions")
 export class TransactionsController {
   constructor(private readonly transactionsService: TransactionsService) {}
@@ -21,18 +30,10 @@ export class TransactionsController {
   @ApiOperation({ summary: "Create a new transaction" })
   async create(
     @Body()
-    body: {
-      walletId: string;
-      categoryId: string;
-      amount: number;
-      currency?: string;
-      description?: string;
-      transactionDate: string;
-      source?: string;
-    },
-    @Query("userId") userId: string,
+    body: CreateTransactionDto,
+    @Request() req: any,
   ) {
-    return this.transactionsService.create(userId, {
+    return this.transactionsService.create(req.user.id, {
       ...body,
       transactionDate: new Date(body.transactionDate),
     });
@@ -40,70 +41,48 @@ export class TransactionsController {
 
   @Get()
   @ApiOperation({ summary: "Get all transactions for user" })
-  async findAll(
-    @Query("userId") userId: string,
-    @Query("walletId") walletId?: string,
-    @Query("categoryId") categoryId?: string,
-    @Query("startDate") startDate?: string,
-    @Query("endDate") endDate?: string,
-    @Query("limit") limit?: number,
-    @Query("offset") offset?: number,
-  ) {
-    return this.transactionsService.findAll(userId, {
-      walletId,
-      categoryId,
-      startDate: startDate ? new Date(startDate) : undefined,
-      endDate: endDate ? new Date(endDate) : undefined,
-      limit,
-      offset,
+  async findAll(@Request() req: any, @Query() query: TransactionQueryDto) {
+    return this.transactionsService.findAll(req.user.id, {
+      ...query,
+      startDate: query.startDate ? new Date(query.startDate) : undefined,
+      endDate: query.endDate ? new Date(query.endDate) : undefined,
     });
   }
 
   @Get("summary")
   @ApiOperation({ summary: "Get transaction summary" })
-  async getSummary(
-    @Query("userId") userId: string,
-    @Query("startDate") startDate?: string,
-    @Query("endDate") endDate?: string,
-  ) {
+  async getSummary(@Request() req: any, @Query() query: TransactionQueryDto) {
     return this.transactionsService.getSummary(
-      userId,
-      startDate ? new Date(startDate) : undefined,
-      endDate ? new Date(endDate) : undefined,
+      req.user.id,
+      query.startDate ? new Date(query.startDate) : undefined,
+      query.endDate ? new Date(query.endDate) : undefined,
     );
   }
 
   @Get(":id")
   @ApiOperation({ summary: "Get transaction by ID" })
-  async findById(@Param("id") id: string, @Query("userId") userId: string) {
-    return this.transactionsService.findById(id, userId);
+  async findById(@Param("id") id: string, @Request() req: any) {
+    return this.transactionsService.findById(id, req.user.id);
   }
 
   @Patch(":id")
   @ApiOperation({ summary: "Update transaction" })
   async update(
     @Param("id") id: string,
-    @Query("userId") userId: string,
+    @Request() req: any,
     @Body()
-    body: Partial<{
-      walletId: string;
-      categoryId: string;
-      amount: number;
-      currency: string;
-      description: string;
-      transactionDate: string;
-    }>,
+    body: UpdateTransactionDto,
   ) {
     const data: any = { ...body };
     if (body.transactionDate) {
       data.transactionDate = new Date(body.transactionDate);
     }
-    return this.transactionsService.update(id, userId, data);
+    return this.transactionsService.update(id, req.user.id, data);
   }
 
   @Delete(":id")
   @ApiOperation({ summary: "Delete transaction" })
-  async delete(@Param("id") id: string, @Query("userId") userId: string) {
-    return this.transactionsService.delete(id, userId);
+  async delete(@Param("id") id: string, @Request() req: any) {
+    return this.transactionsService.delete(id, req.user.id);
   }
 }

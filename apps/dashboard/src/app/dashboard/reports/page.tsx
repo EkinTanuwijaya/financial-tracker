@@ -2,65 +2,137 @@
 
 import { useState, useEffect } from "react";
 import { transactionsApi } from "@/lib/api";
+import {
+  formatCurrency,
+  formatPercent,
+  savingsRate,
+  topCategories,
+} from "@/lib/utils";
+import { exportReportPdf } from "@/lib/pdf";
+import FinanceIcon from "@/components/FinanceIcon";
+
+type ReportPeriod = "week" | "month" | "year" | "all";
+
+interface PeriodRange {
+  startDate?: string;
+  endDate?: string;
+  label: string;
+  dateRangeLabel: string;
+  daysElapsed: number | null;
+}
+
+function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function getPeriodRange(period: ReportPeriod): PeriodRange {
+  const now = new Date();
+  const end = toISODate(now);
+
+  switch (period) {
+    case "week": {
+      // Week starts Monday
+      const mondayOffset = (now.getDay() + 6) % 7;
+      const monday = new Date(now);
+      monday.setDate(now.getDate() - mondayOffset);
+      return {
+        startDate: toISODate(monday),
+        endDate: end,
+        label: "This week",
+        dateRangeLabel: `${monday.toLocaleDateString("id-ID", {
+          day: "numeric",
+          month: "short",
+        })} – ${now.toLocaleDateString("id-ID", {
+          day: "numeric",
+          month: "short",
+          year: "numeric",
+        })}`,
+        daysElapsed: mondayOffset + 1,
+      };
+    }
+    case "year": {
+      const jan1 = new Date(now.getFullYear(), 0, 1);
+      return {
+        startDate: toISODate(jan1),
+        endDate: end,
+        label: "This year",
+        dateRangeLabel: String(now.getFullYear()),
+        daysElapsed:
+          Math.floor((now.getTime() - jan1.getTime()) / 86_400_000) + 1,
+      };
+    }
+    case "all":
+      return {
+        label: "All time",
+        dateRangeLabel: "All time",
+        daysElapsed: null,
+      };
+    case "month":
+    default: {
+      const first = new Date(now.getFullYear(), now.getMonth(), 1);
+      return {
+        startDate: toISODate(first),
+        endDate: end,
+        label: "This month",
+        dateRangeLabel: now.toLocaleDateString("id-ID", {
+          month: "long",
+          year: "numeric",
+        }),
+        daysElapsed: now.getDate(),
+      };
+    }
+  }
+}
 
 export default function ReportsPage() {
   const [summary, setSummary] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [period, setPeriod] = useState<"month" | "week" | "day">("month");
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [loadError, setLoadError] = useState("");
+  const [period, setPeriod] = useState<ReportPeriod>("month");
+  const range = getPeriodRange(period);
 
   useEffect(() => {
+    let cancelled = false;
+
     const fetchSummary = async () => {
       setIsLoading(true);
+      setLoadError("");
+      setExportError("");
       try {
-        const now = new Date();
-        let startDate: Date;
+        const r = getPeriodRange(period);
+        const params: Record<string, string> = {};
+        if (r.startDate) params.startDate = r.startDate;
+        if (r.endDate) params.endDate = r.endDate;
 
-        switch (period) {
-          case "day":
-            startDate = new Date(
-              now.getFullYear(),
-              now.getMonth(),
-              now.getDate(),
-            );
-            break;
-          case "week":
-            const day = now.getDay();
-            startDate = new Date(
-              now.getFullYear(),
-              now.getMonth(),
-              now.getDate() - day,
-            );
-            break;
-          case "month":
-          default:
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            break;
-        }
-
-        const data = await transactionsApi.summary({
-          startDate: startDate.toISOString().split("T")[0],
-          endDate: now.toISOString().split("T")[0],
-        });
-        setSummary(data);
+        const data = await transactionsApi.summary(
+          Object.keys(params).length > 0 ? params : undefined,
+        );
+        if (!cancelled) setSummary(data);
       } catch (error) {
         console.error("Failed to load summary:", error);
+        if (!cancelled) {
+          setSummary(null);
+          setLoadError(
+            "Could not load this period. Select another period or refresh to retry.",
+          );
+        }
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
     };
 
     fetchSummary();
+    return () => {
+      cancelled = true;
+    };
   }, [period]);
 
-  const formatCurrency = (amount: number) => {
-    return new Intl.NumberFormat("id-ID", {
-      style: "currency",
-      currency: "IDR",
-      minimumFractionDigits: 0,
-    }).format(amount);
-  };
-
-  if (isLoading) {
+  if (isLoading && !summary) {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
@@ -68,53 +140,246 @@ export default function ReportsPage() {
     );
   }
 
+  const income = summary?.totalIncome ?? 0;
+  const expense = summary?.totalExpense ?? 0;
+  const net = income - expense;
+  const rate = savingsRate(income, expense);
+  const topSpend = topCategories(summary?.byCategory, 3);
+  type WalletFlow = { income: number; expense: number };
+  const walletEntries = (
+    summary?.byWallet
+      ? (Object.entries(summary.byWallet) as [string, WalletFlow][])
+      : []
+  ).sort((a, b) => b[1].expense - a[1].expense);
+  const daysElapsed = range.daysElapsed;
+
+  const handleExport = () => {
+    if (!summary || isLoading) return;
+    setExportError("");
+    setIsExporting(true);
+    try {
+      exportReportPdf({
+        periodLabel: range.label,
+        dateRangeLabel: range.dateRangeLabel,
+        totalIncome: income,
+        totalExpense: expense,
+        byCategory: summary.byCategory ?? {},
+        byWallet: summary.byWallet ?? {},
+      });
+    } catch {
+      setExportError("Could not create the PDF. Please try again.");
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
-          <p className="text-gray-500">View your spending analytics</p>
+          <p className="text-gray-500">
+            {range.label}
+            {range.dateRangeLabel !== range.label &&
+              ` · ${range.dateRangeLabel}`}
+          </p>
         </div>
-        <div className="flex space-x-2">
-          {(["day", "week", "month"] as const).map((p) => (
+        <div className="flex space-x-2 flex-wrap">
+          {(["week", "month", "year", "all"] as const).map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
-              className={`px-4 py-2 rounded-lg text-sm font-medium ${
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
                 period === p
                   ? "bg-blue-600 text-white"
                   : "bg-white text-gray-700 border border-gray-300 hover:bg-gray-50"
               }`}
             >
-              {p.charAt(0).toUpperCase() + p.slice(1)}
+              {p === "all"
+                ? "All Time"
+                : p.charAt(0).toUpperCase() + p.slice(1)}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white rounded-lg shadow-sm p-6 border">
-          <h3 className="text-sm font-medium text-gray-500">Total Income</h3>
-          <p className="mt-2 text-3xl font-bold text-green-600">
-            {summary ? formatCurrency(summary.totalIncome) : "Rp0"}
+      {loadError && (
+        <p role="alert" className="text-sm text-red-600">
+          {loadError}
+        </p>
+      )}
+      <section
+        className="report-export-panel"
+        aria-labelledby="report-export-title"
+        aria-busy={isLoading || isExporting}
+      >
+        <span className="report-export-icon">
+          <FinanceIcon name="reports" />
+        </span>
+        <div className="report-export-description">
+          <p className="eyebrow">TAKE THE INSIGHTS WITH YOU</p>
+          <h2 id="report-export-title">
+            Your financial picture, in one report.
+          </h2>
+          <p>
+            {range.label} · {range.dateRangeLabel} · A4 PDF
+          </p>
+          <ul aria-label="Included in the PDF">
+            <li>Cash-flow overview</li>
+            <li>Spending shares</li>
+            <li>Category & wallet details</li>
+          </ul>
+          {exportError && (
+            <p className="report-export-error" role="alert">
+              {exportError}
+            </p>
+          )}
+        </div>
+        <button
+          onClick={handleExport}
+          disabled={isExporting || isLoading || !summary}
+          className="primary-action"
+        >
+          <FinanceIcon name="down" />
+          {isExporting
+            ? "Preparing PDF…"
+            : isLoading
+              ? "Loading period…"
+              : "Download report"}
+        </button>
+      </section>
+
+      {/* Headline figures */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-white rounded-lg shadow-sm p-5 border">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Income
+          </p>
+          <p className="mt-1.5 text-xl font-bold text-green-600">
+            {formatCurrency(income)}
           </p>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-6 border">
-          <h3 className="text-sm font-medium text-gray-500">Total Expense</h3>
-          <p className="mt-2 text-3xl font-bold text-red-600">
-            {summary ? formatCurrency(summary.totalExpense) : "Rp0"}
+        <div className="bg-white rounded-lg shadow-sm p-5 border">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Expense
+          </p>
+          <p className="mt-1.5 text-xl font-bold text-red-600">
+            {formatCurrency(expense)}
           </p>
         </div>
-        <div className="bg-white rounded-lg shadow-sm p-6 border">
-          <h3 className="text-sm font-medium text-gray-500">Net Balance</h3>
-          <p className="mt-2 text-3xl font-bold text-blue-600">
-            {summary
-              ? formatCurrency(summary.totalIncome - summary.totalExpense)
-              : "Rp0"}
+        <div className="bg-white rounded-lg shadow-sm p-5 border">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Net
           </p>
+          <p
+            className={`mt-1.5 text-xl font-bold ${net >= 0 ? "text-gray-900" : "text-red-600"}`}
+          >
+            {formatCurrency(net)}
+          </p>
+        </div>
+        <div className="bg-white rounded-lg shadow-sm p-5 border">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+            Savings rate
+          </p>
+          <p
+            className={`mt-1.5 text-xl font-bold ${rate >= 0 ? "text-green-600" : "text-red-600"}`}
+          >
+            {income > 0 ? formatPercent(rate) : "—"}
+          </p>
+          {daysElapsed !== null && (
+            <p className="mt-1 text-xs text-gray-400">
+              {formatCurrency(expense / Math.max(1, daysElapsed))} per day
+            </p>
+          )}
         </div>
       </div>
+
+      {/* Insight strip */}
+      {(topSpend.length > 0 || walletEntries.length > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Heaviest spending
+            </h2>
+            {topSpend.length === 0 ? (
+              <p className="mt-2 text-sm text-gray-500">
+                No expenses in this period.
+              </p>
+            ) : (
+              <>
+                <p className="mt-2 text-sm text-gray-600">
+                  <span className="font-semibold text-gray-900">
+                    {topSpend[0].name}
+                  </span>{" "}
+                  took the most at{" "}
+                  <span className="font-semibold text-gray-900">
+                    {formatCurrency(topSpend[0].amount)}
+                  </span>{" "}
+                  ({formatPercent(topSpend[0].percent, 0)} of all spending).
+                </p>
+                <div className="mt-4 space-y-3">
+                  {topSpend.map((s) => (
+                    <div key={s.name}>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-700">{s.name}</span>
+                        <span className="text-gray-500">
+                          {formatCurrency(s.amount)}
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-2 rounded-full bg-gray-100 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-red-400"
+                          style={{ width: `${s.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="bg-white rounded-lg shadow-sm border p-6">
+            <h2 className="text-lg font-semibold text-gray-900">
+              Active accounts
+            </h2>
+            {walletEntries.length === 0 ? (
+              <p className="mt-2 text-sm text-gray-500">
+                No activity in this period.
+              </p>
+            ) : (
+              <>
+                <p className="mt-2 text-sm text-gray-600">
+                  {walletEntries[0][0]} saw the most outflow at{" "}
+                  <span className="font-semibold text-gray-900">
+                    {formatCurrency(walletEntries[0][1].expense)}
+                  </span>
+                  .
+                </p>
+                <ul className="mt-4 space-y-2">
+                  {walletEntries.map(([name, data]) => (
+                    <li
+                      key={name}
+                      className="flex justify-between text-sm border-b border-gray-100 pb-2 last:border-0"
+                    >
+                      <span className="text-gray-700">{name}</span>
+                      <span className="text-gray-500">
+                        <span className="text-green-600">
+                          +{formatCurrency(data.income)}
+                        </span>{" "}
+                        ·{" "}
+                        <span className="text-red-600">
+                          −{formatCurrency(data.expense)}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* By Category */}
       <div className="bg-white rounded-lg shadow-sm border">

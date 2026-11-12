@@ -1,0 +1,152 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: finance
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: finance_tracker
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U finance -d finance_tracker"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DATABASE_URL: postgresql://finance:ci-only-password@localhost:5432/finance_tracker?schema=public
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @finance-tracker/backend run db:generate
+      - run: pnpm --filter @finance-tracker/backend exec jest --runInBand
+      - run: pnpm --filter @finance-tracker/dashboard test
+      - run: pnpm --filter @finance-tracker/shared test
+      - run: python -m unittest discover -s services/ocr -p 'test_*.py'
+      - name: Check production migrations against schema
+        run: |
+          pnpm --filter @finance-tracker/backend exec prisma migrate deploy --schema=../../packages/prisma/schema.prisma
+          pnpm --filter @finance-tracker/backend exec prisma migrate diff --from-url "$DATABASE_URL" --to-schema-datamodel ../../packages/prisma/schema.prisma --exit-code
+      - name: Validate deployment script
+        run: bash -n scripts/deploy.sh
+      - name: Check production deployment configuration
+        run: node --test scripts/deployment.test.cjs
+      - name: Validate Nginx HTTPS configuration
+        run: |
+          certificates=$(mktemp -d)
+          trap 'rm -rf "$certificates"' EXIT
+          openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
+            -keyout "$certificates/privkey.pem" -out "$certificates/fullchain.pem" \
+            -subj '/CN=192.0.2.1' -addext 'subjectAltName=IP:192.0.2.1'
+          docker run --rm \
+            -v "$PWD/docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "$certificates:/etc/nginx/tls:ro" \
+            nginx:stable-alpine nginx -t
+
+  images:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [backend, dashboard, ocr]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image settings
+        id: image
+        env:
+          REPOSITORY: ${{ github.repository }}
+          SERVICE: ${{ matrix.service }}
+        run: |
+          echo "name=ghcr.io/${REPOSITORY,,}-$SERVICE" >> "$GITHUB_OUTPUT"
+          if [ "$SERVICE" = ocr ]; then
+            echo 'file=docker/ocr.Dockerfile' >> "$GITHUB_OUTPUT"
+          else
+            echo 'file=docker/production.Dockerfile' >> "$GITHUB_OUTPUT"
+            echo "target=$SERVICE" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and optionally publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ steps.image.outputs.file }}
+          target: ${{ steps.image.outputs.target }}
+          platforms: linux/amd64
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.image.outputs.name }}:${{ github.sha }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ vars.APP_ORIGIN || 'https://127.0.0.1' }}
+            NEXT_PUBLIC_GOOGLE_CLIENT_ID=${{ vars.GOOGLE_CLIENT_ID }}
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  deploy:
+    needs: images
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy over SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT || '22' }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
+          APP_ORIGIN: ${{ vars.APP_ORIGIN }}
+          REPOSITORY: ${{ github.repository }}
+          IMAGE_TAG: ${{ github.sha }}
+          DEPLOY_BRANCH: main
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          latest=$(gh api "repos/$REPOSITORY/commits/$DEPLOY_BRANCH" --jq .sha)
+          if [ "$latest" != "$IMAGE_TAG" ]; then
+            echo 'A newer commit exists; skipping this deployment.'
+            exit 0
+          fi
+          : "${VPS_HOST:?Set VPS_HOST}" "${VPS_USER:?Set VPS_USER}"
+          : "${VPS_SSH_KEY:?Set VPS_SSH_KEY}" "${VPS_KNOWN_HOSTS:?Set VPS_KNOWN_HOSTS}"
+          : "${APP_ORIGIN:?Set repository variable APP_ORIGIN before deploying}"
+          [[ "$APP_ORIGIN" == https://* ]] || { echo 'APP_ORIGIN must use HTTPS'; exit 1; }
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$VPS_SSH_KEY" > ~/.ssh/deploy_key
+          printf '%s\n' "$VPS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/deploy_key ~/.ssh/known_hosts
+          trap 'rm -f ~/.ssh/deploy_key' EXIT
+          options=(-i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=15)
+          release="/opt/finance-tracker/releases/$IMAGE_TAG"
+          ssh "${options[@]}" -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" "mkdir -p '$release'"
+          scp "${options[@]}" -P "$VPS_PORT" docker-compose.prod.yml docker/nginx.conf scripts/deploy.sh "$VPS_USER@$VPS_HOST:$release/"
+          ssh "${options[@]}" -p "$VPS_PORT" "$VPS_USER@$VPS_HOST" \
+            "cd '$release' && IMAGE_PREFIX='ghcr.io/${REPOSITORY,,}' IMAGE_TAG='$IMAGE_TAG' bash deploy.sh"
