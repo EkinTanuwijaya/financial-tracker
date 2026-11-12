@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { walletsApi, ApiError } from "@/lib/api";
+import Modal from "@/components/Modal";
+import FinanceIcon from "@/components/FinanceIcon";
 import {
   formatCurrency,
   formatPercent,
@@ -131,9 +133,10 @@ export default function WalletsPage() {
   const typeBreakdown = Object.entries(typeCount).sort((a, b) => b[1] - a[1]);
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
-      <div className="flex justify-between items-start">
+    <div className="management-page space-y-6">
+      <div className="overview-heading">
         <div>
+          <p className="eyebrow">ACCOUNTS</p>
           <h1 className="text-2xl font-bold text-gray-900">Wallets</h1>
           <p className="text-gray-500">
             {wallets.length === 0
@@ -151,9 +154,9 @@ export default function WalletsPage() {
             resetForm();
             setShowForm(true);
           }}
-          className="text-sm text-blue-600 hover:text-blue-800 font-medium whitespace-nowrap"
+          className="primary-action"
         >
-          + Add wallet
+          <FinanceIcon name="plus" /> Add wallet
         </button>
       </div>
 
@@ -166,90 +169,148 @@ export default function WalletsPage() {
         </p>
       )}
 
-      {/* Net worth */}
-      {wallets.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-white rounded-lg shadow-sm p-6 border md:col-span-1">
-            <p className="text-sm font-medium text-gray-500">Net worth</p>
-            <p className="mt-2 text-2xl font-bold text-gray-900">
-              {formatCurrency(netWorth)}
-            </p>
-            <p className="mt-1 text-sm text-gray-500">
-              {netWorth < 0
-                ? "Accounts are overdrawn"
-                : `${share.length} funded ${
-                    share.length === 1 ? "account" : "accounts"
-                  }`}
-            </p>
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm p-6 border md:col-span-2">
-            <p className="text-sm font-medium text-gray-500">Concentration</p>
-            {share.length === 0 ? (
-              <p className="mt-2 text-sm text-gray-500">
-                No account holds a positive balance.
-              </p>
-            ) : (
-              <>
-                <p className="mt-2 text-sm text-gray-700">
-                  {share[0].name} holds{" "}
-                  <span className="font-semibold text-gray-900">
-                    {formatPercent(share[0].percent, 0)}
-                  </span>{" "}
-                  of your balance
-                  {share.length > 1 && (
-                    <>
-                      , {share[1].name} {formatPercent(share[1].percent, 0)}
-                    </>
-                  )}
-                </p>
-                <div className="mt-3 flex h-2.5 rounded-full overflow-hidden bg-gray-100">
-                  {share.map((s, i) => (
-                    <div
-                      key={s.name}
-                      className={`h-full ${chartColor(i)}`}
-                      style={{ width: `${s.percent}%` }}
-                      title={`${s.name} ${formatCurrency(s.amount)} · ${formatPercent(s.percent)}`}
-                    />
-                  ))}
-                </div>
-                <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-gray-600">
-                  {share.map((s, i) => (
-                    <span
-                      key={s.name}
-                      className="inline-flex items-center gap-1.5"
-                    >
-                      <span
-                        className={`w-2.5 h-2.5 rounded-sm ${chartColor(i)}`}
-                      />
-                      <span className="text-gray-700">{s.name}</span>
-                      <span className="text-gray-400">
-                        {formatCurrency(s.amount)}
-                      </span>
-                      <span className="text-gray-400">
-                        {formatPercent(s.percent, 0)}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {showForm && (
-        <div className="bg-white rounded-lg shadow-sm p-6 border space-y-4">
-          <div className="flex justify-between items-center">
-            <h2 className="text-lg font-semibold text-gray-900">
-              {editingWallet ? "Edit Wallet" : "New Wallet"}
-            </h2>
-            <button
-              onClick={resetForm}
-              className="text-gray-400 hover:text-gray-600"
+      <div className="management-columns">
+        <div className="management-primary">
+          {showForm && (
+            <Modal
+              icon="wallet"
+              title={editingWallet ? "Edit wallet" : "Add wallet"}
+              onClose={resetForm}
+              busy={submitting}
+              closeLabel="Close wallet form"
             >
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {error && (
+                  <div
+                    role="alert"
+                    className="bg-red-50 text-red-600 p-4 rounded-lg text-sm"
+                  >
+                    {error}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label
+                      htmlFor="name"
+                      className="block text-sm font-medium text-gray-700 mb-1"
+                    >
+                      Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      id="name"
+                      type="text"
+                      value={formData.name}
+                      onChange={(e) => handleChange("name", e.target.value)}
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g., BCA, Cash, GoPay"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="type"
+                      className="block text-sm font-medium text-gray-700 mb-1"
+                    >
+                      Type <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      id="type"
+                      value={formData.type}
+                      onChange={(e) => handleChange("type", e.target.value)}
+                      required
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="CASH">Cash</option>
+                      <option value="BANK">Bank Account</option>
+                      <option value="EWALLET">E-Wallet</option>
+                      <option value="CREDIT_CARD">Credit Card</option>
+                      <option value="OTHER">Other</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Currency
+                    </label>
+                    <div className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm text-gray-600">
+                      {CURRENCY_CODE} — {CURRENCY_LABEL} ({CURRENCY_SYMBOL})
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="balance"
+                      className="block text-sm font-medium text-gray-700 mb-1"
+                    >
+                      Initial Balance
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 pointer-events-none">
+                        {CURRENCY_SYMBOL}
+                      </span>
+                      <input
+                        id="balance"
+                        type="text"
+                        inputMode="numeric"
+                        value={balanceInput}
+                        onChange={(e) => {
+                          const raw = e.target.value
+                            .replace(/[^\d-]/g, "")
+                            .replace(/(?!^)-/g, "");
+                          setBalanceInput(raw);
+                          setFormData((prev) => ({
+                            ...prev,
+                            balance: parseAmountInput(raw),
+                          }));
+                          setError("");
+                        }}
+                        onBlur={() =>
+                          setBalanceInput(
+                            formatNumberForInput(formData.balance),
+                          )
+                        }
+                        className="w-full pl-12 px-3 py-2 border border-gray-300 rounded-md text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        placeholder="0"
+                      />
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Rupiah has no decimals ·{" "}
+                      {formatCurrency(formData.balance)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end space-x-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    disabled={submitting}
+                    onClick={resetForm}
+                    className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {submitting
+                      ? "Saving..."
+                      : editingWallet
+                        ? "Update"
+                        : "Create"}
+                  </button>
+                </div>
+              </form>
+            </Modal>
+          )}
+
+          {wallets.length === 0 ? (
+            <div className="management-empty bg-white rounded-lg shadow-sm p-12 border text-center">
               <svg
-                className="w-5 h-5"
+                className="mx-auto h-12 w-12 text-gray-400"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -258,215 +319,170 @@ export default function WalletsPage() {
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
+                  d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
                 />
               </svg>
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {error && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-lg text-sm">
-                {error}
+              <h3 className="mt-2 text-sm font-medium text-gray-900">
+                No wallets
+              </h3>
+              <p className="mt-1 text-sm text-gray-500">
+                Get started by creating a new wallet.
+              </p>
+              <button
+                className="primary-action"
+                onClick={() => {
+                  resetForm();
+                  setShowForm(true);
+                }}
+              >
+                <FinanceIcon name="plus" /> Add your first wallet
+              </button>
+            </div>
+          ) : (
+            <section className="wallet-account-list">
+              <div className="management-section-heading table-heading">
+                <h2>Your accounts</h2>
+                <span className="count-badge">{wallets.length} wallets</span>
               </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label
-                  htmlFor="name"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Name <span className="text-red-500">*</span>
-                </label>
-                <input
-                  id="name"
-                  type="text"
-                  value={formData.name}
-                  onChange={(e) => handleChange("name", e.target.value)}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., BCA, Cash, GoPay"
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="type"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Type <span className="text-red-500">*</span>
-                </label>
-                <select
-                  id="type"
-                  value={formData.type}
-                  onChange={(e) => handleChange("type", e.target.value)}
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="CASH">Cash</option>
-                  <option value="BANK">Bank Account</option>
-                  <option value="EWALLET">E-Wallet</option>
-                  <option value="CREDIT_CARD">Credit Card</option>
-                  <option value="OTHER">Other</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Currency
-                </label>
-                <div className="w-full px-3 py-2 border border-gray-200 rounded-md bg-gray-50 text-sm text-gray-600">
-                  {CURRENCY_CODE} — {CURRENCY_LABEL} ({CURRENCY_SYMBOL})
-                </div>
-              </div>
-
-              <div>
-                <label
-                  htmlFor="balance"
-                  className="block text-sm font-medium text-gray-700 mb-1"
-                >
-                  Initial Balance
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500 pointer-events-none">
-                    {CURRENCY_SYMBOL}
-                  </span>
-                  <input
-                    id="balance"
-                    type="text"
-                    inputMode="numeric"
-                    value={balanceInput}
-                    onChange={(e) => {
-                      const raw = e.target.value
-                        .replace(/[^\d-]/g, "")
-                        .replace(/(?!^)-/g, "");
-                      setBalanceInput(raw);
-                      setFormData((prev) => ({
-                        ...prev,
-                        balance: parseAmountInput(raw),
-                      }));
-                      setError("");
-                    }}
-                    onBlur={() =>
-                      setBalanceInput(formatNumberForInput(formData.balance))
-                    }
-                    className="w-full pl-12 px-3 py-2 border border-gray-300 rounded-md text-right focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="0"
-                  />
-                </div>
-                <p className="mt-1 text-xs text-gray-500">
-                  Rupiah has no decimals · {formatCurrency(formData.balance)}
+              {wallets.map((wallet) => {
+                const colorIndex = colorFor.get(wallet.name);
+                const swatch =
+                  colorIndex === undefined
+                    ? "bg-gray-100 text-gray-400"
+                    : chartSoftColor(colorIndex);
+                return (
+                  <div key={wallet.id} className="wallet-account-row">
+                    <div className="flex items-center space-x-4 min-w-0">
+                      <div
+                        className={`w-12 h-12 rounded-full flex items-center justify-center ${swatch}`}
+                      >
+                        <svg
+                          className="w-6 h-6"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                          />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-900">
+                          {wallet.name}
+                        </h3>
+                        <p className="text-sm text-gray-500">
+                          {wallet.type.toLowerCase().replace(/_/g, " ")} ·{" "}
+                          {CURRENCY_CODE}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="wallet-card-footer">
+                      <span
+                        className={`wallet-row-balance ${Number(wallet.balance) < 0 ? "expense-text" : ""}`}
+                      >
+                        {formatCurrency(Number(wallet.balance))}
+                      </span>
+                      <button
+                        onClick={() => handleEdit(wallet)}
+                        aria-label={`Edit ${wallet.name}`}
+                        className="text-blue-600 hover:text-blue-900 text-sm font-medium"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => handleDelete(wallet.id)}
+                        aria-label={`Delete ${wallet.name}`}
+                        className="text-red-600 hover:text-red-900 text-sm font-medium"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </section>
+          )}
+        </div>
+        <aside className="management-aside" aria-label="Wallet summary">
+          {/* Net worth */}
+          {wallets.length > 0 && (
+            <div className="wallet-summary">
+              <div className="wallet-net-worth rounded-lg shadow-sm p-6 border ">
+                <p className="text-sm font-medium text-gray-500">Net worth</p>
+                <p className="mt-2 text-2xl font-bold text-gray-900">
+                  {formatCurrency(netWorth)}
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {netWorth < 0
+                    ? "Accounts are overdrawn"
+                    : `${share.length} funded ${
+                        share.length === 1 ? "account" : "accounts"
+                      }`}
                 </p>
               </div>
-            </div>
 
-            <div className="flex justify-end space-x-3 pt-4 border-t">
-              <button
-                type="button"
-                onClick={resetForm}
-                className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm font-medium"
-              >
-                Cancel
-              </button>
-              <button
-                type="submit"
-                disabled={submitting}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {submitting ? "Saving..." : editingWallet ? "Update" : "Create"}
-              </button>
-            </div>
-          </form>
-        </div>
-      )}
-
-      {wallets.length === 0 ? (
-        showForm ? null : (
-          <div className="bg-white rounded-lg shadow-sm p-12 border text-center">
-            <svg
-              className="mx-auto h-12 w-12 text-gray-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            <h3 className="mt-2 text-sm font-medium text-gray-900">
-              No wallets
-            </h3>
-            <p className="mt-1 text-sm text-gray-500">
-              Get started by creating a new wallet.
-            </p>
-          </div>
-        )
-      ) : (
-        <div className="bg-white rounded-lg shadow-sm border divide-y">
-          {wallets.map((wallet) => {
-            const colorIndex = colorFor.get(wallet.name);
-            const swatch =
-              colorIndex === undefined
-                ? "bg-gray-100 text-gray-400"
-                : chartSoftColor(colorIndex);
-            return (
-              <div
-                key={wallet.id}
-                className="p-6 flex items-center justify-between hover:bg-gray-50"
-              >
-                <div className="flex items-center space-x-4">
-                  <div
-                    className={`w-12 h-12 rounded-full flex items-center justify-center ${swatch}`}
-                  >
-                    <svg
-                      className="w-6 h-6"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      />
-                    </svg>
-                  </div>
-                  <div>
-                    <h3 className="font-semibold text-gray-900">
-                      {wallet.name}
-                    </h3>
-                    <p className="text-sm text-gray-500">
-                      {wallet.type} • {CURRENCY_CODE}
+              <div className="bg-white rounded-lg shadow-sm p-6 border ">
+                <p className="text-sm font-medium text-gray-500">
+                  Balance distribution
+                </p>
+                {share.length === 0 ? (
+                  <p className="mt-2 text-sm text-gray-500">
+                    No account holds a positive balance.
+                  </p>
+                ) : (
+                  <>
+                    <p className="mt-2 text-sm text-gray-700">
+                      {share[0].name} holds{" "}
+                      <span className="font-semibold text-gray-900">
+                        {formatPercent(share[0].percent, 0)}
+                      </span>{" "}
+                      of your balance
+                      {share.length > 1 && (
+                        <>
+                          , {share[1].name} {formatPercent(share[1].percent, 0)}
+                        </>
+                      )}
                     </p>
-                  </div>
-                </div>
-                <div className="flex items-center space-x-4">
-                  <span className="font-semibold text-gray-900">
-                    {formatCurrency(Number(wallet.balance))}
-                  </span>
-                  <button
-                    onClick={() => handleEdit(wallet)}
-                    className="text-blue-600 hover:text-blue-900 text-sm font-medium"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(wallet.id)}
-                    className="text-red-600 hover:text-red-900 text-sm font-medium"
-                  >
-                    Delete
-                  </button>
-                </div>
+                    <div className="mt-3 flex h-2.5 rounded-full overflow-hidden bg-gray-100">
+                      {share.map((s, i) => (
+                        <div
+                          key={s.name}
+                          className={`h-full ${chartColor(i)}`}
+                          style={{ width: `${s.percent}%` }}
+                          title={`${s.name} ${formatCurrency(s.amount)} · ${formatPercent(s.percent)}`}
+                        />
+                      ))}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-gray-600">
+                      {share.map((s, i) => (
+                        <span
+                          key={s.name}
+                          className="inline-flex items-center gap-1.5"
+                        >
+                          <span
+                            className={`w-2.5 h-2.5 rounded-sm ${chartColor(i)}`}
+                          />
+                          <span className="text-gray-700">{s.name}</span>
+                          <span className="text-gray-400">
+                            {formatCurrency(s.amount)}
+                          </span>
+                          <span className="text-gray-400">
+                            {formatPercent(s.percent, 0)}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
               </div>
-            );
-          })}
-        </div>
-      )}
+            </div>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }
