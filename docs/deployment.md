@@ -1,6 +1,6 @@
 # Ubuntu VPS deployment
 
-GitHub Actions runs tests, checks database migrations, builds three Linux amd64 images, and publishes commit-tagged images to GHCR. Pushes to the repository's default branch then deploy over SSH. Pull requests and other branches test and build without deploying. Manual workflow runs deploy only from the default branch.
+The `main.yml` GitHub Actions workflow triggers only on pushes to `main`. It runs tests, checks database migrations, builds three Linux amd64 images, publishes commit-tagged images to GHCR, and deploys over SSH. Pull requests, pushes to other branches, and manual dispatch do not trigger the workflow.
 
 Images build on GitHub runners, so the VPS only pulls and runs them. The production Compose file is standalone. It runs PostgreSQL, Redis, PaddleOCR, the API, dashboard, and Nginx. Only ports 80 and 443 are published. Container memory limits total about 3.2 GiB, leaving space for Ubuntu and Docker on a 4 GB VPS. This is a starting budget, not a measured capacity guarantee. OCR can exhaust its 1.5 GiB allowance on large receipts; inspect `docker stats` and container logs if it restarts. Deployment briefly interrupts service; this is a single-instance deployment.
 
@@ -62,9 +62,9 @@ In repository **Settings → Secrets and variables → Actions**, set:
 
 Obtain the host-key entry with `ssh-keyscan -H -p 22 YOUR_VPS_IP` from your computer. Verify its fingerprint against the VPS console's `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` before saving it. For a custom SSH port, scan that port. The workflow enforces host-key checking.
 
-Create a GitHub environment named `production`. Restrict deployment branches to the default branch if desired. Add required reviewers only if you want manual approval on each deployment.
+Create a GitHub environment named `production`. Restrict deployment branches to `main` if desired. Add required reviewers only if you want manual approval on each deployment.
 
-Commit and push these files to the default branch. Watch **Actions → CI/CD**. The pipeline runs tests and migration checks, builds all three images, and then deploys. OCR's first start downloads models and can take several minutes. Ensure the VPS has outbound access and sufficient disk space for its image and model cache. Runtime API keys and database secrets stay on the VPS.
+Commit and push these files to `main`. Watch **Actions → CI/CD**. The pipeline runs tests and migration checks, builds all three images, and then deploys. OCR's first start downloads models and can take several minutes. Ensure the VPS has outbound access and sufficient disk space for its image and model cache. Runtime API keys and database secrets stay on the VPS.
 
 The dashboard's API origin and optional Google client ID are embedded during its image build. Changing those GitHub variables requires a new build. Set the same Google ID on the VPS only after you have a domain supported by Google's OAuth origin rules.
 
