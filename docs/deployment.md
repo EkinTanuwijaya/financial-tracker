@@ -60,6 +60,8 @@ In repository **Settings → Secrets and variables → Actions**, set:
 | Secret | `VPS_SSH_KEY` | Full private key from `finance-tracker-deploy`, including header/footer |
 | Secret | `VPS_KNOWN_HOSTS` | Verified SSH host-key entry for the VPS |
 
+If deployment reports `error in libcrypto`, update `VPS_SSH_KEY` with the complete private key, not its path, public key, or SHA256 fingerprint. On Windows PowerShell, run `Get-Content -Raw "$env:USERPROFILE\.ssh\finance-tracker-deploy" | Set-Clipboard`, then paste into the GitHub secret. Include the `BEGIN OPENSSH PRIVATE KEY` and `END OPENSSH PRIVATE KEY` lines with their dashes and preserve real line breaks. The key must have no passphrase for this workflow. The workflow normalizes Windows line endings and validates the key before connecting. If a secret named `VPS_SSH_KEY` also exists in the `production` environment, update that value too because it overrides the repository secret.
+
 Obtain the host-key entry with `ssh-keyscan -H -p 22 YOUR_VPS_IP` from your computer. Verify its fingerprint against the VPS console's `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` before saving it. For a custom SSH port, scan that port. The workflow enforces host-key checking.
 
 Create a GitHub environment named `production`. Restrict deployment branches to `main` if desired. Add required reviewers only if you want manual approval on each deployment.
