@@ -12,6 +12,7 @@ COPY tsconfig.base.json ./
 COPY packages/prisma ./packages/prisma
 
 FROM dependencies AS backend
+COPY packages/shared ./packages/shared
 COPY apps/backend/src ./apps/backend/src
 COPY apps/backend/tsconfig.json ./apps/backend/
 RUN pnpm --filter @finance-tracker/backend run db:generate \

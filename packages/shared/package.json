@@ -10,6 +10,8 @@
     "test": "node --test \"test/*.test.cjs\""
   },
   "dependencies": {
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "zod": "^4.6.6"
   },
   "devDependencies": {

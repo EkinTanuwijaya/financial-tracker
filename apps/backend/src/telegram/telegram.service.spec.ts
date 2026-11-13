@@ -193,4 +193,26 @@ describe("Telegram confirmation safety", () => {
     });
     expect(bot().describe(error)).toContain("ETIMEDOUT; ENETUNREACH");
   });
+  it("exports the dashboard report layout using the linked user's selected period", async () => {
+    const service = bot();
+    service.findLinkedUser = jest.fn().mockResolvedValue({ id: "user" });
+    service.sendChatAction = jest.fn();
+    service.sendDocument = jest.fn();
+    service.transactions.getSummary = jest.fn().mockResolvedValue({
+      totalIncome: 32000, totalExpense: 16000,
+      byCategory: { Food: { income: 0, expense: 16000 } },
+      byWallet: { Cash: { income: 32000, expense: 16000 } },
+    });
+    await service.sendReport({ chat: { id: 1, type: "private" } }, "all");
+    expect(service.transactions.getSummary).toHaveBeenCalledWith("user", undefined, undefined);
+    expect(service.sendDocument).toHaveBeenCalledWith(
+      1, expect.any(Buffer), "financial-report-all.pdf", expect.stringContaining("All time"),
+    );
+    const pdf = service.sendDocument.mock.calls[0][1].toString("latin1");
+    expect(pdf).toContain("Cash flow at a glance");
+    expect(pdf).toContain("Category breakdown");
+    expect(pdf).toContain("Wallet cash flow");
+    expect(pdf).toContain("Rp 32.000");
+    expect(pdf).toContain("WIB");
+  });
 });

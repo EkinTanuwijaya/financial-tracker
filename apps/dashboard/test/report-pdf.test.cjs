@@ -10,6 +10,7 @@ require.extensions[".ts"] = (module, filename) => {
   }).outputText, filename);
 };
 const { createReportPdf } = require("../src/lib/pdf.ts");
+const { generateReportPdf } = require("../../backend/src/reports/report-pdf.ts");
 const fixture = {
   periodLabel: "All time", dateRangeLabel: "All time", totalIncome: 32000, totalExpense: 16500,
   byCategory: { Salary: { income: 32000, expense: 0 }, Food: { income: 0, expense: 16000 }, Transport: { income: 0, expense: 500 } },
@@ -51,6 +52,22 @@ test("negative cash flow is shown as a shortfall", () => {
   const output = createReportPdf({ ...fixture, totalIncome: 10000 }).output();
   assert.ok(output.includes("Spending exceeded income by Rp 6.500"));
   assert.ok(output.includes("-65%"));
+});
+
+test("Telegram and dashboard exports contain identical report pages for the same data", () => {
+  const generatedAt = new Date("2026-11-02T01:02:00Z");
+  const pages = (pdf) => [...pdf.matchAll(/\nstream\r?\n([\s\S]*?)\r?\nendstream/g)].map((match) => match[1]);
+  for (const data of [fixture, { ...fixture, totalIncome: 10000 }, {
+    ...fixture, totalIncome: 0, totalExpense: 0, byCategory: {}, byWallet: {},
+  }]) {
+    const dashboard = createReportPdf(data, generatedAt).output();
+    const telegram = generateReportPdf(data, {
+      label: data.periodLabel, dateRangeLabel: data.dateRangeLabel,
+    }, generatedAt);
+    assert.ok(Buffer.isBuffer(telegram));
+    assert.ok(pages(dashboard).length > 0);
+    assert.deepEqual(pages(telegram.toString("latin1")), pages(dashboard));
+  }
 });
 
 test("long category and wallet lists paginate and retain the last rows and page counts", () => {
