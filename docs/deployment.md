@@ -40,6 +40,8 @@ JWT_SECRET=YOUR_SECOND_RANDOM_HEX_SECRET
 
 Generate each secret separately with `openssl rand -hex 32`. Hex avoids URL-encoding problems in the database connection string. Fill in AI configuration to enable receipt extraction. Leave the Telegram token empty unless this is the only backend polling that bot token. Do not change the database password after initialization without also rotating it inside PostgreSQL.
 
+If 9router runs on the VPS host on port 20128, set `AI_PROVIDER=9router` and `AI_BASE_URL=http://host.docker.internal:20128/v1` in the production environment file, along with its API key and model. The backend maps that hostname to the Docker host on Ubuntu. Use the API base path `/v1`, not `/dashboard`. The router must listen on an interface reachable from Docker's bridge; a service bound only to `127.0.0.1` cannot be reached through this mapping. A working browser dashboard alone does not verify authenticated API access from the backend.
+
 For private GHCR images, log in **as deploy** once with your GitHub username and a personal access token (classic) with `read:packages`. Grant it access to this repository's packages, including organization SSO authorization if required:
 
 ```bash
