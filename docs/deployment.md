@@ -6,6 +6,8 @@ Images build on GitHub runners, so the VPS only pulls and runs them. The product
 
 ## 1. Prepare the VPS
 
+Every deployment overwrites the Compose file, Nginx configuration, and deployment script in `/opt/finance-tracker/app`. Image settings are saved in that folder's `.env`. Runtime secrets stay in `/opt/finance-tracker/.env.production`; certificates and database volumes persist separately. Existing folders under `/opt/finance-tracker/releases` are no longer used and are not deleted automatically.
+
 Requires an **amd64 Ubuntu VPS**, Docker Engine, and a recent Compose v2 plugin supporting `up --wait`. Confirm `uname -m` prints `x86_64`, and run `docker compose version`. ARM VPS images are not built by this workflow.
 
 Create a dedicated deploy user and deployment directory using your existing sudo account:
@@ -99,11 +101,12 @@ openssl x509 -req -in tls/server.csr -CA ca/root.crt -CAkey ca/root.key \
 
 Download `/opt/finance-tracker/ca/root.crt` over your verified SSH connection and import it into your device/browser's trusted certificate authorities. Only distribute `root.crt`; keep both private keys on the VPS. Trusting this CA allows it to sign certificates your device accepts, so install it only on devices you control. After deployment, open `https://YOUR_VPS_IP`. Visitors who have not installed the CA will see a certificate warning.
 
-Renew the server certificate before its one-year expiry by rerunning the `openssl x509` command with the same CA and IP. Do not recreate the CA during ordinary renewal. From the release directory, with the image variables exported as shown below, validate and reload Nginx:
+Renew the server certificate before its one-year expiry by rerunning the `openssl x509` command with the same CA and IP. Do not recreate the CA during ordinary renewal. Validate and reload Nginx:
 
 ```bash
-docker compose --env-file /opt/finance-tracker/.env.production -f docker-compose.prod.yml exec -T nginx nginx -t
-docker compose --env-file /opt/finance-tracker/.env.production -f docker-compose.prod.yml exec -T nginx nginx -s reload
+cd /opt/finance-tracker/app
+docker compose --env-file ../.env.production --env-file .env -f docker-compose.prod.yml exec -T nginx nginx -t
+docker compose --env-file ../.env.production --env-file .env -f docker-compose.prod.yml exec -T nginx nginx -s reload
 ```
 
 Later, point a domain's DNS A record at the VPS and change `APP_ORIGIN` on both GitHub and the VPS to `https://your-domain`. Replace the files in `tls` with a publicly trusted certificate chain and matching private key, then push a new commit or rerun the workflow. Arrange certificate renewal and an Nginx reload after renewal; this setup does not automate certificate issuance or renewal. See [Nginx HTTPS configuration](https://nginx.org/en/docs/http/configuring_https_servers.html) for certificate-chain requirements.
@@ -114,21 +117,21 @@ The repository now includes an initial Prisma migration matching the current sch
 
 For future changes, generate migrations against a separate development database with `pnpm --filter @finance-tracker/backend run db:migrate`, review the SQL, and commit `packages/prisma/migrations`. CI applies every migration to a fresh PostgreSQL instance and checks that the resulting schema matches the Prisma file. Production runs only `prisma migrate deploy`. Keep migrations compatible with the previous API version because it can remain running while migrations apply. Plan destructive changes separately.
 
-Before each migration, deployment saves a compressed database dump under `/opt/finance-tracker/backups`, mode 600. A failed pull, backup, or migration stops deployment. Health-check failures fail the workflow. There is no automatic database or application rollback. Check the failed step before retrying. Releases and backups are retained; copy backups off the VPS and manage retention as disk usage grows. The deploy dump is not a scheduled backup or protection against disk loss.
+Before each migration, deployment saves a compressed database dump under `/opt/finance-tracker/backups`, mode 600. A failed pull, backup, or migration stops deployment. Health-check failures fail the workflow. There is no automatic database or application rollback. Check the failed step before retrying. Configuration files are overwritten; backups are retained. Copy backups off the VPS and manage retention as disk usage grows. The deploy dump is not a scheduled backup or protection against disk loss.
 
-For logs or manual redeployment, log in as `deploy`, select a release, and export its image settings:
-
-```bash
-cd /opt/finance-tracker/releases/COMMIT_SHA
-export IMAGE_PREFIX=ghcr.io/ekintanuwijaya/financial-tracker
-export IMAGE_TAG=COMMIT_SHA
-docker compose --env-file /opt/finance-tracker/.env.production -f docker-compose.prod.yml logs --tail=100
-```
-
-To roll back application images, use the previous release directory and previous commit tag, then run:
+For status and logs, log in as `deploy` and use the fixed app directory. Image settings load from its `.env`, so no commit SHA is needed:
 
 ```bash
-docker compose --env-file /opt/finance-tracker/.env.production -f docker-compose.prod.yml up -d --remove-orphans --wait --wait-timeout 900
+cd /opt/finance-tracker/app
+docker compose --env-file ../.env.production --env-file .env -f docker-compose.prod.yml ps
+docker compose --env-file ../.env.production --env-file .env -f docker-compose.prod.yml logs --tail=100 -f
 ```
 
-Do not rerun the old deployment script for rollback: its older migration history may not match the database. Application rollback requires backward-compatible database changes. A database restore loses writes after the chosen backup; inspect and plan it separately. Never run `docker compose down -v` on production: it deletes database and other persistent volumes.
+Docker images still use commit tags to ensure each deployment pulls matching application versions. To roll back application images, export a previous commit tag from the fixed app directory and run:
+
+```bash
+export IMAGE_TAG=PREVIOUS_COMMIT_SHA
+docker compose --env-file ../.env.production --env-file .env -f docker-compose.prod.yml up -d --remove-orphans --wait --wait-timeout 900
+```
+
+This reuses the current configuration; older configuration files are not retained. Application rollback requires backward-compatible database changes. A database restore loses writes after the chosen backup; inspect and plan it separately. Never run `docker compose down -v` on production: it deletes database and other persistent volumes.

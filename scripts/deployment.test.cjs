@@ -8,6 +8,7 @@ const { test } = require('node:test');
 test('production isolates internal services, budgets RAM, and mounts Nginx TLS read-only', () => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'finance-deployment-'));
   const file = path.join(directory, 'deployment.env');
+  const images = path.join(directory, 'images.env');
   const settings = {
     IMAGE_PREFIX: 'ghcr.io/example/finance',
     IMAGE_TAG: 'test',
@@ -18,8 +19,10 @@ test('production isolates internal services, budgets RAM, and mounts Nginx TLS r
   const env = { ...process.env };
   for (const key of Object.keys(settings)) delete env[key];
   const render = (values) => {
-    fs.writeFileSync(file, Object.entries(values).map(([key, value]) => `${key}=${value}`).join('\n'));
-    return spawnSync('docker', ['compose', '--env-file', file, '-f', 'docker-compose.prod.yml', 'config', '--format', 'json'], {
+    const entries = Object.entries(values);
+    fs.writeFileSync(file, entries.filter(([key]) => !key.startsWith('IMAGE_')).map(([key, value]) => `${key}=${value}`).join('\n'));
+    fs.writeFileSync(images, entries.filter(([key]) => key.startsWith('IMAGE_')).map(([key, value]) => `${key}=${value}`).join('\n'));
+    return spawnSync('docker', ['compose', '--env-file', file, '--env-file', images, '-f', 'docker-compose.prod.yml', 'config', '--format', 'json'], {
       cwd: path.join(__dirname, '..'), env, encoding: 'utf8',
     });
   };
@@ -27,6 +30,7 @@ test('production isolates internal services, budgets RAM, and mounts Nginx TLS r
     const result = render(settings);
     assert.equal(result.status, 0, result.stderr);
     const { services } = JSON.parse(result.stdout);
+    assert.equal(services.backend.image, 'ghcr.io/example/finance-backend:test');
     assert.deepEqual(Object.keys(services).filter((key) => services[key].ports?.length), ['nginx']);
     assert.equal(services.nginx.image, 'nginx:stable-alpine');
     for (const target of ['/etc/nginx/conf.d/default.conf', '/etc/nginx/tls']) {
