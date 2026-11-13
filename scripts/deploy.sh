@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 umask 077
 
-# Each release keeps its compose file and Nginx configuration for manual rollback.
+# Deployment overwrites the configuration in /opt/finance-tracker/app.
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")"
 : "${IMAGE_PREFIX:?Set IMAGE_PREFIX}"
 : "${IMAGE_TAG:?Set IMAGE_TAG}"
@@ -14,7 +14,8 @@ test -s "$root/tls/fullchain.pem" && test -s "$root/tls/privkey.pem" || {
 }
 exec 9>"$root/deploy.lock"
 flock -n 9 || { echo 'Another deployment is running.' >&2; exit 1; }
-compose=(docker compose --env-file "$root/.env.production" -f docker-compose.prod.yml)
+printf 'IMAGE_PREFIX=%s\nIMAGE_TAG=%s\n' "$IMAGE_PREFIX" "$IMAGE_TAG" > .env
+compose=(docker compose --env-file "$root/.env.production" --env-file .env -f docker-compose.prod.yml)
 "${compose[@]}" config --quiet
 "${compose[@]}" pull
 "${compose[@]}" run --rm --no-deps nginx nginx -t
@@ -30,5 +31,7 @@ echo "Database backup: $backup"
   pnpm --filter @finance-tracker/backend exec prisma migrate deploy \
   --schema=../../packages/prisma/schema.prisma
 "${compose[@]}" up -d --remove-orphans --wait --wait-timeout 900
+# The config mount path stays the same, so apply overwritten Nginx settings.
+"${compose[@]}" exec -T nginx nginx -s reload
 "${compose[@]}" ps
 printf 'Deployed %s\n' "$IMAGE_TAG"
