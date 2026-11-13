@@ -123,6 +123,8 @@ Swagger UI available at `http://localhost:3001/api/docs` when backend is running
 
 Set `TELEGRAM_BOT_TOKEN` in `.env` and start the backend to run the bot.
 
+Send `/report week`, `/report month`, `/report year`, or `/report all` for a PDF. Telegram and dashboard exports use the same report template, including cash-flow charts, spending insights, category and wallet tables, pagination, and Jakarta generation time.
+
 Send `/link` to the bot in a private chat, then paste its one-time pairing code into the dashboard's Telegram settings. Codes expire after ten minutes. A numeric Telegram ID alone cannot link an account. Existing links continue to work. Transaction confirmations also expire after ten minutes and require the Telegram account to remain linked.
 
 ## Deployment
