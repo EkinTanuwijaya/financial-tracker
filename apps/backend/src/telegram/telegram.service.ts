@@ -221,7 +221,13 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
           pending.receiptId,
         );
         this.pendingConfirmations.delete(chatId);
-        await this.sendMessage(chatId, "Saved. ✅");
+        try {
+          await this.sendMessage(chatId, "Saved. ✅");
+        } catch (error) {
+          this.logger.error(
+            `Transaction saved, but Telegram confirmation reply failed: ${this.describe(error)}`,
+          );
+        }
         return;
       } else {
         this.pendingConfirmations.delete(chatId);
@@ -1161,6 +1167,8 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
               AbortSignal.timeout(35_000),
             ])
           : AbortSignal.timeout(30_000),
+    }).catch((error: unknown) => {
+      throw new Error(`Telegram ${method} request failed: ${this.describe(error)}`);
     });
 
     const data = (await response.json()) as {
@@ -1181,7 +1189,18 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
   }
 
   private describe(error: unknown): string {
-    const text = error instanceof Error ? error.message : String(error);
+    let text = error instanceof Error ? error.message : String(error);
+    const cause = (error as { cause?: {
+      code?: string;
+      message?: string;
+      errors?: Array<{ code?: string; message?: string }>;
+    } } | null)?.cause;
+    const details = [cause?.code, cause?.message];
+    if (Array.isArray(cause?.errors)) {
+      details.push(...cause.errors.map((item) => item.code || item.message));
+    }
+    const reason = details.filter(Boolean).join("; ");
+    if (reason) text += ` (${reason})`;
     // The bot token is part of every request URL, so an error that embeds one
     // would otherwise write the credential into the container logs.
     return this.token ? text.split(this.token).join("<redacted>") : text;

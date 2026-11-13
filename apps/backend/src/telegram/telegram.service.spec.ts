@@ -139,4 +139,58 @@ describe("Telegram confirmation safety", () => {
       jest.useRealTimers();
     }
   });
+  it("keeps a successful save when sending the confirmation reply fails", async () => {
+    const service = bot();
+    service.findLinkedUser = jest.fn().mockResolvedValue({ id: "user" });
+    service.sendMessage = jest.fn().mockRejectedValue(new Error("fetch failed"));
+    service.logger.error = jest.fn();
+    service.pendingConfirmations.set(1, {
+      userId: "user",
+      walletId: "wallet",
+      categoryId: "category",
+      amount: 100,
+      date: new Date(),
+      expiresAt: Date.now() + 600000,
+    });
+
+    await expect(service.handleUpdate({
+      update_id: 123,
+      message: { chat: { id: 1, type: "private" }, text: "yes" },
+    })).resolves.toBeUndefined();
+
+    expect(service.transactions.create).toHaveBeenCalledTimes(1);
+    expect(service.pendingConfirmations.has(1)).toBe(false);
+    expect(service.logger.error).toHaveBeenCalledWith(
+      expect.stringContaining("Transaction saved, but Telegram confirmation reply failed"),
+    );
+  });
+  it("identifies the failing Telegram method and network cause without logging the token", async () => {
+    const service = new TelegramService(
+      { get: () => "private-test-token" } as any,
+      {} as any, {} as any, {} as any, {} as any,
+      {} as any, {} as any, {} as any,
+    ) as any;
+    const originalFetch = global.fetch;
+    global.fetch = jest.fn().mockRejectedValue(Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("https://api.telegram.org/botprivate-test-token/sendMessage"), {
+        code: "ECONNRESET",
+      }),
+    }));
+    try {
+      const error = await service.call("sendMessage", { chat_id: 1, text: "Saved" })
+        .catch((failure: Error) => failure);
+      expect(error.message).toContain("Telegram sendMessage request failed");
+      expect(error.message).toContain("ECONNRESET");
+      expect(error.message).toContain("<redacted>");
+      expect(error.message).not.toContain("private-test-token");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
+  it("includes connection codes from aggregate network errors", () => {
+    const error = Object.assign(new TypeError("fetch failed"), {
+      cause: { errors: [{ code: "ETIMEDOUT" }, { code: "ENETUNREACH" }] },
+    });
+    expect(bot().describe(error)).toContain("ETIMEDOUT; ENETUNREACH");
+  });
 });
