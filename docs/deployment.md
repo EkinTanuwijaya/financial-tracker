@@ -8,6 +8,8 @@ Images build on GitHub runners, so the VPS only pulls and runs them. The product
 
 Every deployment overwrites the Compose file, Nginx configuration, and deployment script in `/opt/finance-tracker/app`. Image settings are saved in that folder's `.env`. Runtime secrets stay in `/opt/finance-tracker/.env.production`; certificates and database volumes persist separately. Existing folders under `/opt/finance-tracker/releases` are no longer used and are not deleted automatically.
 
+The backend prefers IPv4 DNS results and disables automatic address-family selection as a workaround for Telegram connection failures where explicit IPv4 tests succeed. IPv6 routing or automatic address selection may contribute to these failures. This applies to all backend Node.js connections, including AI requests. It does not change Ubuntu's network configuration. Automatic fallback between IPv4 and IPv6 is disabled; use this setting where IPv4 connectivity is available.
+
 Requires an **amd64 Ubuntu VPS**, Docker Engine, and a recent Compose v2 plugin supporting `up --wait`. Confirm `uname -m` prints `x86_64`, and run `docker compose version`. ARM VPS images are not built by this workflow.
 
 Create a dedicated deploy user and deployment directory using your existing sudo account:

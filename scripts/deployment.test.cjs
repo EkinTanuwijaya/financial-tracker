@@ -38,6 +38,11 @@ test('production isolates internal services, budgets RAM, and mounts Nginx TLS r
       assert.ok(mount?.read_only, `${target} must be mounted read-only`);
     }
     assert.equal(services.backend.environment.NODE_ENV, 'production');
+    const network = spawnSync(process.execPath, ['-e', 'console.log(JSON.stringify({order:require("node:dns").getDefaultResultOrder(),auto:require("node:net").getDefaultAutoSelectFamily()}))'], {
+      env: { ...env, NODE_OPTIONS: services.backend.environment.NODE_OPTIONS }, encoding: 'utf8',
+    });
+    assert.equal(network.status, 0, network.stderr);
+    assert.deepEqual(JSON.parse(network.stdout), { order: 'ipv4first', auto: false });
     for (const name of ['backend', 'dashboard', 'ocr']) {
       assert.ok(!services[name].build, `${name} must use a prebuilt image`);
       assert.ok(!(services[name].volumes || []).some((volume) => volume.type === 'bind'));
